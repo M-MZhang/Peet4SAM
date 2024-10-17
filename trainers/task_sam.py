@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Tuple
 from .build import register
 from ..models.modeling import ImageEncoderViT, TwoWayTransformer, PromptEncoder_task, MaskDecoder
 from .iou_loss import IOU
+from ..models.utils.transforms import ResizeLongestSide
 
 
 logger = logging.getLogger(__name__)
@@ -50,12 +51,13 @@ class Task_SAM(nn.Module):
     def __init__(self, inp_size=None, encoder_mode=None, loss=None):
         super().__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.transform = ResizeLongestSide(encoder_mode['img_size'])
         self.embed_dim = encoder_mode['embed_dim']
         
         self.image_encoder = ImageEncoderViT(
             depth=encoder_mode['depth'],
             embed_dim=encoder_mode['embed_dim'],
-            img_size=inp_size,
+            img_size=encoder_mode['img_size'],
             mlp_ratio=encoder_mode['mlp_ratio'],
             norm_layer=partial(torch.nn.LayerNorm, eps=1e-6),
             act_layer=nn.GELU,
@@ -70,7 +72,7 @@ class Task_SAM(nn.Module):
             rel_pos_zero_init=True,
         )
 
-        image_embedding_size = inp_size // encoder_mode['patch_size']
+        image_embedding_size = encoder_mode['img_size'] // encoder_mode['patch_size']
 
         self.prompt_encoder = PromptEncoder_task(
             embed_dim=encoder_mode['prompt_embed_dim'],
@@ -112,9 +114,14 @@ class Task_SAM(nn.Module):
         batched_input: List[Dict[str, Any]],
         multimask_output: bool=False,
     )->List[Dict[str, torch.Tensor]]:
+        
         input_images = torch.stack([self.preprocess(x["image"]) for x in batched_input], dim=0)
-        image_embeddings = self.image_encoder(input_images) #[B, C, H, W]
-        # self.gt_mask = batched_input["gt"]
+        input_images = self.transform.apply_image(input_images) 
+        input_image_torch = torch.as_tensor(input_images, device=self.device).permute(0, 3, 1, 2) # [B, C, H, W]
+        input_image_torch = self.preprocess(input_image_torch)
+
+        image_embeddings = self.image_encoder(input_image_torch) #[B, C, H, W]
+        
 
         outputs = []
         for image_record, curr_embedding in zip(batched_input, image_embeddings):
@@ -136,7 +143,7 @@ class Task_SAM(nn.Module):
             )
             masks = self.postprocess_masks(
                 low_res_masks,
-                input_size=image_record["image"].shape[-2:],
+                input_size=image_record["image"].shape[-2:], # 与下一行做修改
                 original_size=image_record["original_size"],
             )
             masks = masks > self.mask_threshold

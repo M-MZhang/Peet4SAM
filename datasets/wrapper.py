@@ -1,77 +1,141 @@
 import torch
 from torch.utils.data import Dataset
 
-class DatasetWrapper(Dataset):
+import functools
+import random
+import math
+from PIL import Image
 
-    def __init__(self, cfg, data_source, transform=None, is_train=False):
-        self.cfg = cfg
-        self.data_source = data_source
-        self.transform = transform  # accept list (tuple) as input
-        self.is_train = is_train
-        # Augmenting an image K>1 times is only allowed during training
-        self.k_tfm = cfg.DATALOADER.K_TRANSFORMS if is_train else 1
-        self.return_img0 = cfg.DATALOADER.RETURN_IMG0
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+from torchvision import transforms
+import torchvision
 
-        if self.k_tfm > 1 and transform is None:
-            raise ValueError(
-                "Cannot augment the image {} times "
-                "because transform is None".format(self.k_tfm)
-            )
+from datasets import register
+from math import pi
+from torchvision.transforms import InterpolationMode
 
-        # Build transform that doesn't apply any data augmentation
-        interp_mode = INTERPOLATION_MODES[cfg.INPUT.INTERPOLATION]
-        to_tensor = []
-        to_tensor += [T.Resize(cfg.INPUT.SIZE, interpolation=interp_mode)]
-        to_tensor += [T.ToTensor()]
-        if "normalize" in cfg.INPUT.TRANSFORMS:
-            normalize = T.Normalize(
-                mean=cfg.INPUT.PIXEL_MEAN, std=cfg.INPUT.PIXEL_STD
-            )
-            to_tensor += [normalize]
-        self.to_tensor = T.Compose(to_tensor)
+import torch.nn.functional as F
+def to_mask(mask):
+    return transforms.ToTensor()(
+        transforms.Grayscale(num_output_channels=1)(
+            transforms.ToPILImage()(mask)))
+
+
+def resize_fn(img, size):
+    return transforms.ToTensor()(
+        transforms.Resize(size)(
+            transforms.ToPILImage()(img)))
+
+
+@register('val')
+class ValDataset(Dataset):
+    def __init__(self, dataset, inp_size=None, augment=False):
+        self.dataset = dataset.val
+        self.inp_size = inp_size
+        self.augment = augment
+
+        self.img_transform = transforms.Compose([
+                transforms.Resize((inp_size, inp_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+            ])
+        self.mask_transform = transforms.Compose([
+                transforms.Resize((inp_size, inp_size), interpolation=Image.NEAREST),
+                transforms.ToTensor(),
+            ])
 
     def __len__(self):
-        return len(self.data_source)
+        return len(self.dataset)
 
     def __getitem__(self, idx):
-        item = self.data_source[idx]
+        img, mask = self.dataset[idx]
 
-        output = {
-            "label": item.label,
-            "domain": item.domain,
-            "impath": item.impath,
-            "index": idx
+        return {
+            'inp': self.img_transform(img),
+            'gt': self.mask_transform(mask)
         }
 
-        img0 = read_image(item.impath)
 
-        if self.transform is not None:
-            if isinstance(self.transform, (list, tuple)):
-                for i, tfm in enumerate(self.transform):
-                    img = self._transform_image(tfm, img0)
-                    keyname = "img"
-                    if (i + 1) > 1:
-                        keyname += str(i + 1)
-                    output[keyname] = img
-            else:
-                img = self._transform_image(self.transform, img0)
-                output["img"] = img
-        else:
-            output["img"] = img0
+@register('test')
+class TestDataset(Dataset):
+    def __init__(self, dataset, inp_size=None, augment=False):
+        self.dataset = dataset.val
+        self.inp_size = inp_size
+        self.augment = augment
 
-        if self.return_img0:
-            output["img0"] = self.to_tensor(img0)  # without any augmentation
+        self.img_transform = transforms.Compose([
+                transforms.Resize((inp_size, inp_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+            ])
+        self.mask_transform = transforms.Compose([
+                transforms.Resize((inp_size, inp_size), interpolation=Image.NEAREST),
+                transforms.ToTensor(),
+            ])
 
-        return output
+    def __len__(self):
+        return len(self.dataset)
 
-    def _transform_image(self, tfm, img0):
-        img_list = []
+    def __getitem__(self, idx):
+        img, mask = self.dataset[idx]
 
-        for k in range(self.k_tfm):
-            img_list.append(tfm(img0))
+        return {
+            'inp': self.img_transform(img),
+            'gt': self.mask_transform(mask)
+        }
 
-        img = img_list
-        if len(img) == 1:
-            img = img[0]
+@register('train')
+class TrainDataset(Dataset):
+    def __init__(self, dataset, size_min=None, size_max=None, inp_size=None,
+                 augment=False, gt_resize=None):
+        self.dataset = dataset.train
+        self.size_min = size_min
+        if size_max is None:
+            size_max = size_min
+        self.size_max = size_max
+        self.augment = augment
+        self.gt_resize = gt_resize
 
-        return img
+        self.inp_size = inp_size
+    
+        self.img_transform = transforms.Compose([
+                transforms.Resize((self.inp_size, self.inp_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+            ])
+        self.inverse_transform = transforms.Compose([
+                transforms.Normalize(mean=[0., 0., 0.],
+                                     std=[1/0.229, 1/0.224, 1/0.225]),
+                transforms.Normalize(mean=[-0.485, -0.456, -0.406],
+                                     std=[1, 1, 1])
+            ])
+        self.mask_transform = transforms.Compose([
+                transforms.Resize((self.inp_size, self.inp_size), interpolation=InterpolationMode),
+                transforms.ToTensor(),
+            ])
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        mask_path, img_path = self.dataset[idx]
+        img = np.load(img_path)
+        mask = np.load(mask_path)
+
+        # random filp
+        if self.augment and random.random() < 0.5:
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+            mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
+
+        # img = transforms.Resize((self.inp_size, self.inp_size))(img)
+        # mask = transforms.Resize((self.inp_size, self.inp_size), interpolation=InterpolationMode.NEAREST)(mask)
+
+        return {
+            'inp': self.img_transform(img),
+            'gt': self.mask_transform(mask)
+        }

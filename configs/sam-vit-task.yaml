@@ -1,3 +1,30 @@
+dataset:
+  name: myeloma
+  args:
+    data_root: root/data1/zmm/Efficient/efficient_data
+    ratios: [0.7, 0.2, 0.1]
+    bbox_shift: 20
+
+train_wrapper:
+  name: train
+  args:
+    inp_size: 256
+    augment: true
+
+val_wrapper:
+    name: val
+    args:
+      inp_size: 256
+      augment: false
+
+test_wrapper:
+    name: test
+    args:
+      inp_size: 256
+      augment: false
+
+batch_size: 2
+    
 eval_type: cod
 sam_checkpoint: ./pretrained/sam_vit_b_01ec64.pth
 data_norm:
@@ -16,13 +43,13 @@ data_norm:
     - 0.5
     div:
     - 0.5
+
 model:
-  name: sam
+  name: task_sam
   args:
-    inp_size: 1024
+    inp_size: 256
     loss: iou
     encoder_mode:
-      name: task_sam
       img_size: 1024
       mlp_ratio: 4
       patch_size: 16

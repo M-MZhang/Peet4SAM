@@ -7,7 +7,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from dataset import *
+import datasets
 import trainers
 import utils
 from statistics import mean
@@ -22,26 +22,29 @@ torch.cuda.set_device(local_rank)
 device = torch.device("cuda", local_rank)
 
 
-def make_data_loader(spec, tag=''):
+def make_data_loader(spec, dataset_source, tag=''):
     if spec is None:
         return None
 
-    dataset = dataset.make(spec['dataset'])
-    # dataset = datasets.make(spec['wrapper'], args={'dataset': dataset})
+    if tag=='train':
+        wrapper = datasets.make(spec, args={'dataset': dataset_source})
+    elif tag == 'val':
+        wrapper = datasets.make(spec, args={'dataset': dataset_source})
     if local_rank == 0:
-        log('{} dataset: size={}'.format(tag, len(dataset)))
-        for k, v in dataset[0].items():
+        log('{} dataset: size={}'.format(tag, len(wrapper)))
+        for k, v in wrapper[0].items():
             log('  {}: shape={}'.format(k, tuple(v.shape)))
 
-    sampler = torch.utils.data.distributed.DistributedSampler(dataset)
-    loader = DataLoader(dataset, batch_size=spec['batch_size'],
+    sampler = torch.utils.data.distributed.DistributedSampler(wrapper)
+    loader = DataLoader(wrapper, batch_size=spec['batch_size'],
         shuffle=False, num_workers=8, pin_memory=True, sampler=sampler)
     return loader
 
 
 def make_data_loaders():
-    train_loader = make_data_loader(config.get('train_dataset'), tag='train')
-    val_loader = make_data_loader(config.get('val_dataset'), tag='val')
+    dataset = datasets.make(config.get('dataset'))
+    train_loader = make_data_loader(config.get('train_wrapper'), dataset_source=dataset.train, tag='train')
+    val_loader = make_data_loader(config.get('val_wrapper'), dataset_source=dataset.val, tag='val')
     return train_loader, val_loader
 
 
