@@ -8,9 +8,9 @@ import torch.nn.functional as F
 from typing import Any, Dict, List, Tuple
 
 from .build import register
-from ..models.modeling import ImageEncoderViT, TwoWayTransformer, PromptEncoder_task, MaskDecoder
+from .modules import ImageEncoderViT, TwoWayTransformer, PromptEncoder_task, MaskDecoder
 from .iou_loss import IOU
-from ..models.utils.transforms import ResizeLongestSide
+from  utils.transforms import ResizeLongestSide
 
 
 logger = logging.getLogger(__name__)

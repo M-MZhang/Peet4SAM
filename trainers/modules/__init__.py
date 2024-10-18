@@ -4,11 +4,11 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-from .sam import Sam
+from ..sam import Sam
 from .image_encoder import ImageEncoderViT
 from .mask_decoder import MaskDecoder
-from .prompt_encoder import PromptEncoder
+from .prompt_encoder import PromptEncoder, PromptEncoder_task
 from .transformer import TwoWayTransformer
-from .task_prompt_encoder import PromptEncoder_task
+
 
 

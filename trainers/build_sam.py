@@ -8,7 +8,7 @@ import torch
 
 from functools import partial
 
-from .modeling import ImageEncoderViT, MaskDecoder, PromptEncoder, Sam, TwoWayTransformer, MaskDecoder_task, PromptEncoder_task
+from modules import ImageEncoderViT, MaskDecoder, PromptEncoder, Sam, TwoWayTransformer, MaskDecoder_task, PromptEncoder_task
 
 
 def build_sam_vit_h(checkpoint=None):
