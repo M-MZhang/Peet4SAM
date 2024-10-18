@@ -84,8 +84,8 @@ class TestDataset(Dataset):
         img, mask = self.dataset[idx]
 
         return {
-            'inp': self.img_transform(img),
-            'gt': self.mask_transform(mask)
+            'image': self.img_transform(img),
+            'gt': self.mask_transform(mask),
         }
 
 @register('train')
@@ -124,18 +124,17 @@ class TrainDataset(Dataset):
 
     def __getitem__(self, idx):
         mask_path, img_path = self.dataset[idx]
-        img = np.load(img_path)
-        mask = np.load(mask_path)
+        img = np.load(img_path) # array [x, y, c]
+        mask = np.load(mask_path) # array [x, y]
+
 
         # random filp
         if self.augment and random.random() < 0.5:
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
             mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
 
-        # img = transforms.Resize((self.inp_size, self.inp_size))(img)
-        # mask = transforms.Resize((self.inp_size, self.inp_size), interpolation=InterpolationMode.NEAREST)(mask)
-
         return {
-            'inp': self.img_transform(img),
-            'gt': self.mask_transform(mask)
+            'image': self.img_transform(img),
+            'gt': self.mask_transform(mask),
+            'original_size': mask.shape,
         }

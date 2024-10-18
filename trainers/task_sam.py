@@ -115,14 +115,12 @@ class Task_SAM(nn.Module):
         multimask_output: bool=False,
     )->List[Dict[str, torch.Tensor]]:
         
-        input_images = torch.stack([self.preprocess(x["image"]) for x in batched_input], dim=0)
-        input_images = self.transform.apply_image(input_images) 
+        input_images = [self.transform.apply_image(x['image']) for x in batched_input] # B, H, W, C transform.resize
         input_image_torch = torch.as_tensor(input_images, device=self.device).permute(0, 3, 1, 2) # [B, C, H, W]
-        input_image_torch = self.preprocess(input_image_torch)
+        input_image_torch = torch.stack([self.preprocess(input_image_torch[x]) for x in range(len(input_image_torch))], dim=0) # padding
 
         image_embeddings = self.image_encoder(input_image_torch) #[B, C, H, W]
         
-
         outputs = []
         for image_record, curr_embedding in zip(batched_input, image_embeddings):
             if "point_coords" in image_record:
@@ -143,7 +141,7 @@ class Task_SAM(nn.Module):
             )
             masks = self.postprocess_masks(
                 low_res_masks,
-                input_size=image_record["image"].shape[-2:], # 与下一行做修改
+                input_size=input_image_torch.shape[-2:], # 与下一行做修改
                 original_size=image_record["original_size"],
             )
             masks = masks > self.mask_threshold
