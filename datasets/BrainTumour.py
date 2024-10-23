@@ -4,44 +4,44 @@ join = os.path.join
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from Peet4SAM.datasets.build import register
+from datasets import register
 import glob
 
-from uitls import mkdir_if_missing, Datum, read_json, write_json
+from .uitls import mkdir_if_missing, Datum, read_json, write_json
 
 @register('braintumour')
 class Myeloma:
-    def __init__(self, data_root, bbox_shift=20):
-        self.data_root = join(data_root, "Braintumour")
-        self.gt_path = join(self.data_root, "mask")
-        self.mask = join(self.data_root, "Tr")
-        self.split_path = join(self.data_root, "split_Myeloma.json")
+    def __init__(self, data_root, ratios=[0.7, 0.2, 0.1], bbox_shift=20):
+        self.data_root = join(data_root, "BrainTumour", "npy")
+        self.gt_path = join(self.data_root, "gts")
+        self.img_path = join(self.data_root, "imgs")
+        self.split_path = join(self.data_root, "split_BrainTumour.json")
         self.split_fewshot_dir = join(self.data_root, "split_fewshot")
         mkdir_if_missing(self.split_fewshot_dir)
 
         if os.path.exists(self.split_path):
-            train, val, test = self.read_split(self.split_path, self.gt_path, self.high_path)
+            train, val, test = self.read_split(self.split_path, self.gt_path, self.img_path)
         else:
             all_files = os.listdir(self.gt_path)
-            train, val, test = self.split_dataset(all_files)
-            self.save_split(train, val, test, self.split_path, self.gt_path, self.high_path)
+            train, val, test = self.split_dataset(all_files, ratios)
+            self.save_split(train, val, test, self.split_path, self.gt_path, self.img_path)
 
         self.train = train
         self.val = val
         self.test = test
 
         self.bbox_shift = bbox_shift
-        print(f"number of images:{len(self.gt_path_files)}")
+        # print(f"number of images:{len(self.gt_path_files)}")
 
 
    
     
-    def split_dataset(all_files, ratios):
+    def split_dataset(self, all_files, ratios):
         if len(ratios) !=3:
             raise ValueError("The length of ratios should be 3.")
         total_ratio = sum(ratios)
-        if total_ratio !=1:
-            raise ValueError("The sum of ratios must be equal to 1!")
+        # if total_ratio != 1.0:
+        #     raise ValueError("The sum of ratios must be equal to 1!")
         
         n = len(all_files)
         results = []
@@ -64,7 +64,8 @@ class Myeloma:
             for item_gt_path, item_high_path in items:
                 item_gt_path = join(gt_path, item_gt_path)
                 item_high_path = join(high_path, item_high_path)
-                item = Datum(gt_path=item_gt_path, high_path=item_high_path)
+                # item = Datum(gt_path=item_gt_path, high_path=item_high_path)
+                item = (item_gt_path, item_high_path)
                 out.append(item)
             return out
 

@@ -1,3 +1,4 @@
 from .build import register, make
-from . import image_folder
 from . import wrappers
+from . import BrainTumour
+from . import myeloma

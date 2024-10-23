@@ -32,26 +32,28 @@ def resize_fn(img, size):
 @register('val')
 class ValDataset(Dataset):
     def __init__(self, dataset, inp_size=None, augment=False):
-        self.dataset = dataset.val
+        self.dataset = dataset
         self.inp_size = inp_size
         self.augment = augment
 
         self.img_transform = transforms.Compose([
-                transforms.Resize((inp_size, inp_size)),
                 transforms.ToTensor(),
+                transforms.Resize((inp_size, inp_size)),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
             ])
         self.mask_transform = transforms.Compose([
-                transforms.Resize((inp_size, inp_size), interpolation=Image.NEAREST),
                 transforms.ToTensor(),
+                transforms.Resize((inp_size, inp_size), interpolation=Image.NEAREST),
             ])
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        img, mask = self.dataset[idx]
+        mask_path, img_path = self.dataset[idx]
+        img = np.load(img_path)
+        mask = np.load(mask_path)
 
         return {
             'inp': self.img_transform(img),
@@ -62,26 +64,28 @@ class ValDataset(Dataset):
 @register('test')
 class TestDataset(Dataset):
     def __init__(self, dataset, inp_size=None, augment=False):
-        self.dataset = dataset.val
+        self.dataset = dataset
         self.inp_size = inp_size
         self.augment = augment
 
         self.img_transform = transforms.Compose([
-                transforms.Resize((inp_size, inp_size)),
                 transforms.ToTensor(),
+                transforms.Resize((inp_size, inp_size)),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
             ])
         self.mask_transform = transforms.Compose([
-                transforms.Resize((inp_size, inp_size), interpolation=Image.NEAREST),
                 transforms.ToTensor(),
+                transforms.Resize((inp_size, inp_size), interpolation=Image.NEAREST),
             ])
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        img, mask = self.dataset[idx]
+        mask_path, img_path = self.dataset[idx]
+        img = np.load(img_path)
+        mask = np.load(mask_path)
 
         return {
             'image': self.img_transform(img),
@@ -92,7 +96,7 @@ class TestDataset(Dataset):
 class TrainDataset(Dataset):
     def __init__(self, dataset, size_min=None, size_max=None, inp_size=None,
                  augment=False, gt_resize=None):
-        self.dataset = dataset.train
+        self.dataset = dataset
         self.size_min = size_min
         if size_max is None:
             size_max = size_min
@@ -103,8 +107,8 @@ class TrainDataset(Dataset):
         self.inp_size = inp_size
     
         self.img_transform = transforms.Compose([
-                transforms.Resize((self.inp_size, self.inp_size)),
                 transforms.ToTensor(),
+                transforms.Resize((self.inp_size, self.inp_size)),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
             ])
@@ -115,8 +119,8 @@ class TrainDataset(Dataset):
                                      std=[1, 1, 1])
             ])
         self.mask_transform = transforms.Compose([
-                transforms.Resize((self.inp_size, self.inp_size), interpolation=InterpolationMode),
                 transforms.ToTensor(),
+                transforms.Resize((self.inp_size, self.inp_size), interpolation=InterpolationMode.NEAREST),
             ])
 
     def __len__(self):
@@ -124,17 +128,17 @@ class TrainDataset(Dataset):
 
     def __getitem__(self, idx):
         mask_path, img_path = self.dataset[idx]
-        img = np.load(img_path) # array [x, y, c]
+        img =np.load(img_path) # array [x, y, c]
         mask = np.load(mask_path) # array [x, y]
 
 
         # random filp
-        if self.augment and random.random() < 0.5:
-            img = img.transpose(Image.FLIP_LEFT_RIGHT)
-            mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
+        # if self.augment and random.random() < 0.5:
+        #     img = np.array(img).transpose(Image.FLIP_LEFT_RIGHT)
+        #     mask = np.array(mask).transpose(Image.FLIP_LEFT_RIGHT)
 
         return {
             'image': self.img_transform(img),
             'gt': self.mask_transform(mask),
-            'original_size': mask.shape,
+            'original_size': tuple(mask.shape),
         }

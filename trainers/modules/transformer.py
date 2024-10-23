@@ -80,11 +80,11 @@ class TwoWayTransformer(nn.Module):
         """
         # BxCxHxW -> BxHWxC == B x N_image_tokens x C
         bs, c, h, w = image_embedding.shape
-        image_embedding = image_embedding.flatten(2).permute(0, 2, 1)
+        image_embedding = image_embedding.flatten(2).permute(0, 2, 1) #[B, 4096, 256]
         image_pe = image_pe.flatten(2).permute(0, 2, 1)
 
         # Prepare queries
-        queries = point_embedding
+        queries = point_embedding #[B, 1+4+1, 256] 这里的B=1 emmm感觉应该要变一下
         keys = image_embedding
 
         # Apply transformer blocks and final layernorm
@@ -164,7 +164,7 @@ class TwoWayAttentionBlock(nn.Module):
         q = queries + query_pe
         k = keys + key_pe
         attn_out = self.cross_attn_token_to_image(q=q, k=k, v=keys)
-        queries = queries + attn_out
+        queries = queries + attn_out # 这里会让queries的shape[0] 跟image的shape[0]对应起来，所以bs=1或者bs=batch都是可以的
         queries = self.norm2(queries)
 
         # MLP block

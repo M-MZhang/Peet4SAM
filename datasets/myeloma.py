@@ -4,10 +4,10 @@ join = os.path.join
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from Peet4SAM.datasets.build import register
+from datasets import register
 import glob
 
-from uitls import mkdir_if_missing, Datum, read_json, write_json
+from .uitls import mkdir_if_missing, Datum, read_json, write_json
 
 @register('myeloma')
 class Myeloma:
@@ -32,7 +32,7 @@ class Myeloma:
         self.test = test
 
         self.bbox_shift = bbox_shift
-        print(f"number of images:{len(self.gt_path_files)}")
+        # print(f"number of images:{len(self.gt_path_files)}")
 
 
     # def __len__(self):

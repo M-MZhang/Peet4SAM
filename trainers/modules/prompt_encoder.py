@@ -356,7 +356,7 @@ class PromptEncoder_task(nn.Module):
           torch.Tensor: dense embeddings for the masks, in the shape
             Bx(embed_dim)x(embed_H)x(embed_W)
         """
-        bs = self._get_batch_size(points, boxes, masks)
+        bs = self._get_batch_size(points, boxes, masks) # 都是None, return的是1？怪了
         sparse_embeddings = torch.empty((bs, 0, self.embed_dim), device=self._get_device())
         if points is not None:
             coords, labels = points
@@ -371,11 +371,11 @@ class PromptEncoder_task(nn.Module):
         else:                                           #[1, emb_dim, 1, 1]
             dense_embeddings = self.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
                 bs, -1, self.image_embedding_size[0], self.image_embedding_size[1]
-            )
+            ) #[bs, 256, 64, 64]
         
-        task_specific_embedings = self.task_specific_embed.unsqueeze(0).expand(
+        task_specific_embedings = self.task_specific_embed.weight.unsqueeze(0).expand(
                 bs, self.task_num, self.embed_dim
-        ) #[B, task_num, C]
+        ) #[B, task_num, C] 1 1 256
         
         sparse_embeddings = torch.cat([sparse_embeddings, task_specific_embedings], dim=1)
 

@@ -27,6 +27,20 @@ def check_isfile(fpath):
         warnings.warn('No file found at "{}"'.format(fpath))
     return isfile
 
+def check_isdir(dpath):
+    """Check if the given path is a directory.
+
+    Args:
+        dpath (str): directory path.
+
+    Returns:
+       bool
+    """
+    isdir = osp.isdir(dpath)
+    if not isdir:
+        warnings.warn('No directory found at "{}"'.format(dpath))
+    return isdir
+
 def read_json(fpath):
     """Read json file from a path."""
     with open(fpath, "r") as f:
@@ -51,8 +65,8 @@ class Datum:
     """
 
     def __init__(self,gt_path, high_path):
-        assert check_isfile(gt_path)
-        assert check_isfile(high_path)
+        assert check_isdir(gt_path)
+        assert check_isdir(high_path)
 
         self._gtpath = gt_path
         self._highpath = high_path

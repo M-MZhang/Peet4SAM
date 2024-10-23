@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Tuple
 from .build import register
 from .modules import ImageEncoderViT, TwoWayTransformer, PromptEncoder_task, MaskDecoder
 from .iou_loss import IOU
-from  utils.transforms import ResizeLongestSide
+from .utils.transforms import ResizeLongestSide
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,27 @@ class BBCEWithLogitLoss(nn.Module):
         loss = w_neg * bce1(pred, gt)
 
         return loss
+
+class BinaryDiceLoss(nn.Module):
+	def __init__(self):
+		super(BinaryDiceLoss, self).__init__()
+	
+	def forward(self, input, targets):
+		# 获取每个批次的大小 N
+		N = targets.size()[0]
+		# 平滑变量
+		smooth = 1
+		# 将宽高 reshape 到同一纬度
+		input_flat = input.view(N, -1)
+		targets_flat = targets.view(N, -1)
+	
+		# 计算交集
+		intersection = input_flat * targets_flat 
+		N_dice_eff = (2 * intersection.sum(1) + smooth) / (input_flat.sum(1) + targets_flat.sum(1) + smooth)
+		# 计算一个批次中平均每张图的损失
+		loss = 1 - N_dice_eff.sum() / N
+		return loss
+
 
 def _iou_loss(pred, target):
     pred = torch.sigmoid(pred)
@@ -68,7 +89,6 @@ class Task_SAM(nn.Module):
             global_attn_indexes=encoder_mode['global_attn_indexes'],
             window_size=encoder_mode['window_size'],
             out_chans=encoder_mode['out_chans'],
-            in_chans=encoder_mode['in_chans'],
             rel_pos_zero_init=True,
         )
 
@@ -93,8 +113,9 @@ class Task_SAM(nn.Module):
             transformer_dim=encoder_mode['prompt_embed_dim'],
             iou_head_depth=3,
             iou_head_hidden_dim=256,
-        ),
+        )
 
+        # use the old data from Sam, but not use it, because it's useful for color pictures, but we are using gray pictures
         self.pixel_mean=encoder_mode['pixel_mean']
         self.pixel_std=encoder_mode['pixel_std']
 
@@ -108,57 +129,62 @@ class Task_SAM(nn.Module):
         elif self.loss_mode == 'iou':
             self.criterionBCE = torch.nn.BCEWithLogitsLoss()
             self.criterionIOU = IOU()
+        
+        self.criterionBCE = torch.nn.BCEWithLogitsLoss()
+        self.dice_loss = BinaryDiceLoss()
     
     def forward(
         self,
         batched_input: List[Dict[str, Any]],
         multimask_output: bool=False,
     )->List[Dict[str, torch.Tensor]]:
-        
-        input_images = [self.transform.apply_image(x['image']) for x in batched_input] # B, H, W, C transform.resize
-        input_image_torch = torch.as_tensor(input_images, device=self.device).permute(0, 3, 1, 2) # [B, C, H, W]
+        images = batched_input['image'] #[B, C, H, W]
+        input_images = [self.transform.apply_image(x) for x in images] # [B, H, W, C]
+        input_image_torch = torch.as_tensor(input_images, device=self.device, dtype=torch.float).permute(0, 3, 1, 2) # [B, C, H, W]
         input_image_torch = torch.stack([self.preprocess(input_image_torch[x]) for x in range(len(input_image_torch))], dim=0) # padding
 
         image_embeddings = self.image_encoder(input_image_torch) #[B, C, H, W]
         
-        outputs = []
-        for image_record, curr_embedding in zip(batched_input, image_embeddings):
-            if "point_coords" in image_record:
-                points = (image_record["point_coords"], image_record["point_labels"])
-            else:
-                points = None
+        
+        
+        # for image_record, curr_embedding in zip(batched_input, image_embeddings):
+            # if (image_record["point_coords"] is not None) or (image_record['boxes'] or image_record['mask_inputs']
+        if "point_coords" in batched_input:
+            points = (batched_input["point_coords"], batched_input["point_labels"])
+        else:
+            points = None
             sparse_embeddings, dense_embeddings = self.prompt_encoder(
-                points=points,
-                boxes=image_record.get("boxes", None),
-                masks=image_record.get("mask_inputs", None),
-            )
-            low_res_masks, iou_predictions = self.mask_decoder(
-                image_embeddings=curr_embedding.unsqueeze(0),#[1, C, H, W]
-                image_pe=self.prompt_encoder.get_dense_pe(), #[1, C, H, W]
-                sparse_prompt_embeddings=sparse_embeddings, #[1, N, C] 
-                dense_prompt_embeddings=dense_embeddings,  #[1, C, H, W]
-                multimask_output=multimask_output,
-            )
-            masks = self.postprocess_masks(
-                low_res_masks,
-                input_size=input_image_torch.shape[-2:], # 与下一行做修改
-                original_size=image_record["original_size"],
-            )
-            masks = masks > self.mask_threshold
-            outputs.append(
-                {
-                    "masks": masks,
-                    "iou_predictions": iou_predictions,
-                    "low_res_logits": low_res_masks,
-                }
-            )
+            points=points,
+            boxes=batched_input.get("boxes", None),
+            masks=batched_input.get("mask_inputs", None),
+        )
+        low_res_masks, iou_predictions = self.mask_decoder(
+            image_embeddings=image_embeddings,#[B, C, H, W]
+            image_pe=self.prompt_encoder.get_dense_pe(), #[1, C, H, W]
+            sparse_prompt_embeddings=sparse_embeddings, #[1, N, C] 
+            dense_prompt_embeddings=dense_embeddings,  #[1, C, H, W]
+            multimask_output=multimask_output,
+        )
+        masks = self.postprocess_masks(
+            low_res_masks,
+            input_size=input_image_torch.shape[-2:], # 与下一行做修改
+            original_size=batched_input["original_size"],
+        )
+        masks = masks > self.mask_threshold
+        outputs={
+                "masks": masks,
+                "iou_predictions": iou_predictions,
+                "low_res_logits": low_res_masks,
+            }
+        
             # self.pred_mask = low_res_masks
         return outputs
 
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
         """Normalize pixel values and pad to a square input."""
         # Normalize colors
-        x = (x - self.pixel_mean) / self.pixel_std
+        # x = (x - self.pixel_mean) / self.pixel_std 
+        # has been normalized in the dataset, don not normalize again?
 
         # Pad
         h, w = x.shape[-2:]
@@ -194,15 +220,17 @@ class Task_SAM(nn.Module):
             mode="bilinear",
             align_corners=False,
         )
-        masks = masks[..., : input_size, : input_size]
-        masks = F.interpolate(masks, original_size, mode="bilinear", align_corners=False)
+        masks = masks[..., : input_size[0], : input_size[1]]
+        masks = F.interpolate(masks, (original_size[0][0].item(), original_size[1][0].item()), mode="bilinear", align_corners=False)
         return masks
 
     def backward_G(self, mask, gt):
         """Calculate GAN and L1 loss for the generator"""
         self.loss_G = self.criterionBCE(mask, gt)
+        self.loss_G += self.dice_loss(nn.Sigmoid()(mask), gt)
+
         if self.loss_mode == 'iou':
-            self.loss_G += _iou_loss(mask, gt)
+            self.loss_G += self.criterionIOU(mask, gt)
 
         self.loss_G.backward()
 

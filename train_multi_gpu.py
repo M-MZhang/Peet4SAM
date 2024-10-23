@@ -13,11 +13,15 @@ import utils
 from statistics import mean
 import torch
 import torch.distributed as dist
+import torch.nn as nn
+import time
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
+os.environ['MASTER_ADDR'] = 'localhost'
+os.environ['MASTER_PORT'] = '29501'
+dist.init_process_group(backend='nccl',init_method=None, rank=0, world_size=4)
 
-torch.distributed.init_process_group(backend='nccl') 
-local_rank = torch.distributed.get_rank() # 
+local_rank = torch.distributed.get_rank() 
 torch.cuda.set_device(local_rank)
 device = torch.device("cuda", local_rank)
 
@@ -33,7 +37,8 @@ def make_data_loader(spec, dataset_source, tag=''):
     if local_rank == 0:
         log('{} dataset: size={}'.format(tag, len(wrapper)))
         for k, v in wrapper[0].items():
-            log('  {}: shape={}'.format(k, tuple(v.shape)))
+            if k!='original_size':
+                log('  {}: shape={}'.format(k, v.shape))
 
     sampler = torch.utils.data.distributed.DistributedSampler(wrapper)
     loader = DataLoader(wrapper, batch_size=spec['batch_size'],
@@ -63,7 +68,7 @@ def prepare_training():
 
     max_epoch = config.get('epoch_max')
     lr_scheduler = CosineAnnealingLR(optimizer, max_epoch, eta_min=config.get('lr_min'))
-    if local_rank == 0: # 没懂这个是干嘛
+    if local_rank == 0:
         log('model: #params={}'.format(utils.compute_num_params(model, text=True)))
     return model, optimizer, epoch_start, lr_scheduler
 
@@ -121,19 +126,26 @@ def eval_psnr(loader, model, eval_type=None):
 
     pred_list = []
     gt_list = []
+    loss_list = []
     for batch in loader:
         for k, v in batch.items():
             batch[k] = v.cuda()
 
         pred = torch.sigmoid(model.forward(batch)['low_res_logits'])
 
-        batch_pred = [torch.zeros_like(pred) for _ in range(dist.get_world_size())]
-        batch_gt = [torch.zeros_like(batch['gt']) for _ in range(dist.get_world_size())]
+        loss = model.dice_loss(nn.Sigmoid(pred), batch['gt'])
+        batch_loss = [torch.zeros_like(loss) for _ in range(dist.get_world_size())]
 
-        dist.all_gather(batch_pred, pred)
-        pred_list.extend(batch_pred)
-        dist.all_gather(batch_gt, batch['gt'])
-        gt_list.extend(batch_gt)
+        dist.all_gather(batch_loss, loss)
+        loss_list.extend(batch_loss)
+
+        # batch_pred = [torch.zeros_like(pred) for _ in range(dist.get_world_size())]
+        # batch_gt = [torch.zeros_like(batch['gt']) for _ in range(dist.get_world_size())]
+
+        # dist.all_gather(batch_pred, pred)
+        # pred_list.extend(batch_pred)
+        # dist.all_gather(batch_gt, batch['gt'])
+        # gt_list.extend(batch_gt)
         if pbar is not None:
             pbar.update(1)
 
@@ -142,9 +154,9 @@ def eval_psnr(loader, model, eval_type=None):
 
     pred_list = torch.cat(pred_list, 1)
     gt_list = torch.cat(gt_list, 1)
-    result1, result2, result3, result4 = metric_fn(pred_list, gt_list)
-
-    return result1, result2, result3, result4, metric1, metric2, metric3, metric4
+    # result1, result2, result3, result4 = metric_fn(pred_list, gt_list)
+    # return result1, result2, result3, result4, metric1, metric2, metric3, metric4
+    return loss_list
 
 
 def main(config_, save_path, args):
@@ -177,6 +189,9 @@ def main(config_, save_path, args):
 
     sam_checkpoint = torch.load(config['sam_checkpoint'])
     model.load_state_dict(sam_checkpoint, strict=False)
+    if config.get('resume') is not None: # load task_spesific_embed in 
+        task_specific_embed = torch.load(os.path.join(save_path, "prompt_epoch_"+str(config['resume'])+".pth"))
+        model.load_state_dict(task_specific_embed, strict=False)
 
     for name, para in model.named_parameters():
         if "task_specific_embed" not in name:
@@ -184,11 +199,12 @@ def main(config_, save_path, args):
     if local_rank == 0:
         model_total_params = sum(p.numel() for p in model.parameters())
         model_grad_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print('model_grad_params:' + str(model_grad_params), '\nmodel_total_params:' + str(model_total_params))
+        print('model_grad_params:' + str(model_grad_params), '\n model_total_params:' + str(model_total_params))
     
     epoch_max = config['epoch_max']
     epoch_val = config.get('epoch_val')
-    max_val_v = -1e18 if config['eval_type'] != 'ber' else 1e8
+    # max_val_v = -1e18 if config['eval_type'] != 'ber' else 1e8
+    min_loss = 1e8
     timer = utils.Timer()
 
     for epoch in range(epoch_start, epoch_max + 1):
@@ -211,27 +227,35 @@ def main(config_, save_path, args):
             save(config, model, save_path, 'last')
         
         if (epoch_val is not None) and (epoch % epoch_val == 0):
-            result1, result2, result3, result4, metric1, metric2, metric3, metric4 = eval_psnr(val_loader, model,
-                eval_type=config.get('eval_type'))
+            # result1, result2, result3, result4, metric1, metric2, metric3, metric4 = eval_psnr(val_loader, model,
+                # eval_type=config.get('eval_type'))
+            loss_list = eval_psnr(val_loader, model, eval_type=config.get('eval_type'))
+            dice_loss = mean(loss_list)
             
             if local_rank == 0:
-                log_info.append('val: {}={:.4f}'.format(metric1, result1))
-                writer.add_scalars(metric1, {'val': result1}, epoch)
-                log_info.append('val: {}={:.4f}'.format(metric2, result2))
-                writer.add_scalars(metric2, {'val': result2}, epoch)
-                log_info.append('val: {}={:.4f}'.format(metric3, result3))
-                writer.add_scalars(metric3, {'val': result3}, epoch)
-                log_info.append('val: {}={:.4f}'.format(metric4, result4))
-                writer.add_scalars(metric4, {'val': result4}, epoch)
+                # log_info.append('val: {}={:.4f}'.format(metric1, result1))
+                # writer.add_scalars(metric1, {'val': result1}, epoch)
+                # log_info.append('val: {}={:.4f}'.format(metric2, result2))
+                # writer.add_scalars(metric2, {'val': result2}, epoch)
+                # log_info.append('val: {}={:.4f}'.format(metric3, result3))
+                # writer.add_scalars(metric3, {'val': result3}, epoch)
+                # log_info.append('val: {}={:.4f}'.format(metric4, result4))
+                # writer.add_scalars(metric4, {'val': result4}, epoch)
+                log_info.append('dice_loss: {:.4f}'.format(dice_loss))
+                writer.add_scalar(dice_loss, {'val': 'dice_loss'}, epoch)
             
-            if config['eval_type'] != 'ber':
-                if result1 > max_val_v:
-                    max_val_v = result1
-                    save(config, model, save_path, 'best')
-            else:
-                if result3 < max_val_v:
-                        max_val_v = result3
-                        save(config, model, save_path, 'best')
+            # if config['eval_type'] != 'ber':
+            #     if result1 > max_val_v:
+            #         max_val_v = result1
+            #         save(config, model, save_path, 'best')
+            # else:
+            #     if result3 < max_val_v:
+            #             max_val_v = result3
+            #             save(config, model, save_path, 'best')
+
+            if dice_loss < min_loss:
+                min_loss = dice_loss
+                save(config, model, save_path, str(epoch))
             
             t = timer.t()
             prog = (epoch - epoch_start + 1) / (epoch_max - epoch_start + 1)
@@ -246,7 +270,32 @@ def main(config_, save_path, args):
 def save(config, model, save_path, name):
     if config['model']['name'] == 'task_sam':
             task_specific_prompt = model.prompt_encoder.task_specific_embed.state_dict()
-            torch.save({"prompt": task_specific_prompt},
+            torch.save({"prompt_encoder.task_specific_embed": task_specific_prompt},
                        os.path.join(save_path, f"prompt_epoch_{name}.pth"))
     else:
         torch.save(model.state_dict(), os.path.join(save_path, f"model_epoch_{name}.pth"))
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', default="configs/sam-vit-task.yaml")
+    parser.add_argument('--name', default=None)
+    parser.add_argument('--tag', default=None)
+    parser.add_argument("--local_rank", type=int, default=-1, help="")
+    args = parser.parse_args()
+    
+
+    with open(args.config, 'r') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+        # if local_rank == 0:
+        #     print('config loaded.')
+
+
+    now_time = time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime())
+    save_name = args.name
+    if save_name is None:
+        save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
+    if args.tag is not None:
+        save_name += '_' + args.tag
+    save_path = os.path.join('./save', save_name, now_time)
+
+    main(config, save_path, args=args)
