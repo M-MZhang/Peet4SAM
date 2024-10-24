@@ -46,6 +46,8 @@ class Task_SAM(nn.Module):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.transform = ResizeLongestSide(encoder_mode['img_size'])
         self.embed_dim = encoder_mode['embed_dim']
+        self.register_buffer("pixel_mean", torch.Tensor(encoder_mode['pixel_mean']).view(-1, 1, 1), False)
+        self.register_buffer("pixel_std", torch.Tensor(encoder_mode['pixel_std']).view(-1, 1, 1), False)
         
         self.image_encoder = ImageEncoderViT(
             depth=encoder_mode['depth'],
@@ -88,8 +90,8 @@ class Task_SAM(nn.Module):
         )
 
         # use the old data from Sam, but not use it, because it's useful for color pictures, but we are using gray pictures
-        self.pixel_mean=encoder_mode['pixel_mean']
-        self.pixel_std=encoder_mode['pixel_std']
+        # self.pixel_mean=encoder_mode['pixel_mean']
+        # self.pixel_std=encoder_mode['pixel_std']
 
         # self.loss_mode = loss
         # if self.loss_mode == 'bce':
@@ -156,8 +158,8 @@ class Task_SAM(nn.Module):
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
         """Normalize pixel values and pad to a square input."""
         # Normalize colors
-        # x = (x - self.pixel_mean) / self.pixel_std 
-        # has been normalized in the dataset, don not normalize again?
+        x = (x - self.pixel_mean) / self.pixel_std 
+       
 
         # Pad
         h, w = x.shape[-2:]

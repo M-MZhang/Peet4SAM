@@ -1,9 +1,7 @@
 import torch
 from torch.utils.data import Dataset
 
-import functools
-import random
-import math
+from skimage import transform
 from PIL import Image
 
 import numpy as np
@@ -36,16 +34,13 @@ class ValDataset(Dataset):
         self.inp_size = inp_size
         self.augment = augment
 
-        self.img_transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Resize((inp_size, inp_size)),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-            ])
-        self.mask_transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Resize((inp_size, inp_size), interpolation=Image.NEAREST),
-            ])
+        # self.img_transform = transforms.Compose([
+        #         transforms.ToTensor(),
+        #         transforms.Resize((inp_size, inp_size)),
+        #         transforms.Normalize(mean=[0.485, 0.456, 0.406],
+        #                              std=[0.229, 0.224, 0.225])
+        #     ])
+       
 
     def __len__(self):
         return len(self.dataset)
@@ -54,11 +49,27 @@ class ValDataset(Dataset):
         mask_path, img_path = self.dataset[idx]
         img = np.load(img_path)
         mask = np.load(mask_path)
+        
+        mask = transform.resize(mask, 
+                                (1024, 1024), 
+                                order=0,
+                                preserve_range=True,
+                                mode='constant',
+                                anti_aliasing=False)
+        mask = torch.from_numpy(np.uint8(mask))
+
+        img = transform.resize(img, 
+                                (self.inp_size,self.inp_size), 
+                                order=3,
+                                preserve_range=True,
+                                mode='constant',
+                                anti_aliasing=False)
+        img = torch.from_numpy(img)
 
         return {
-            'image': self.img_transform(img),
-            'gt': self.mask_transform(mask),
-            'original_size': tuple(mask.shape),
+            'image': img,
+            'gt': mask,
+            'original_size': mask.shape,
         }
 
 
@@ -69,17 +80,13 @@ class TestDataset(Dataset):
         self.inp_size = inp_size
         self.augment = augment
 
-        self.img_transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Resize((inp_size, inp_size)),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-            ])
-        self.mask_transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Resize((inp_size, inp_size), interpolation=Image.NEAREST),
-            ])
-
+        # self.img_transform = transforms.Compose([
+        #         transforms.ToTensor(),
+        #         transforms.Resize((inp_size, inp_size)),
+        #         transforms.Normalize(mean=[0.485, 0.456, 0.406],
+        #                              std=[0.229, 0.224, 0.225])
+        #     ])
+       
     def __len__(self):
         return len(self.dataset)
 
@@ -88,10 +95,26 @@ class TestDataset(Dataset):
         img = np.load(img_path)
         mask = np.load(mask_path)
 
+        mask = transform.resize(mask, 
+                                (1024, 1024), 
+                                order=0,
+                                preserve_range=True,
+                                mode='constant',
+                                anti_aliasing=False)
+        mask = torch.from_numpy(np.uint8(mask))
+
+        img = transform.resize(img, 
+                                (self.inp_size,self.inp_size), 
+                                order=3,
+                                preserve_range=True,
+                                mode='constant',
+                                anti_aliasing=False)
+        img = torch.from_numpy(img)
+
         return {
-            'image': self.img_transform(img),
-            'gt': self.mask_transform(mask),
-            'original_size': tuple(mask.shape),
+            'image': img,
+            'gt': mask,
+            'original_size': mask.shape,
         }
 
 @register('train')
@@ -108,22 +131,18 @@ class TrainDataset(Dataset):
 
         self.inp_size = inp_size
     
-        self.img_transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Resize((self.inp_size, self.inp_size)),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
-            ])
-        self.inverse_transform = transforms.Compose([
-                transforms.Normalize(mean=[0., 0., 0.],
-                                     std=[1/0.229, 1/0.224, 1/0.225]),
-                transforms.Normalize(mean=[-0.485, -0.456, -0.406],
-                                     std=[1, 1, 1])
-            ])
-        self.mask_transform = transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Resize((self.inp_size, self.inp_size), interpolation=InterpolationMode.NEAREST),
-            ])
+        # self.img_transform = transforms.Compose([
+        #         transforms.ToTensor(),
+        #         transforms.Resize((self.inp_size, self.inp_size)),
+        #         transforms.Normalize(mean=[0.485, 0.456, 0.406],
+        #                              std=[0.229, 0.224, 0.225])
+        #     ])
+        # self.inverse_transform = transforms.Compose([
+        #         transforms.Normalize(mean=[0., 0., 0.],
+        #                              std=[1/0.229, 1/0.224, 1/0.225]),
+        #         transforms.Normalize(mean=[-0.485, -0.456, -0.406],
+        #                              std=[1, 1, 1])
+        #     ])
 
     def __len__(self):
         return len(self.dataset)
@@ -134,13 +153,24 @@ class TrainDataset(Dataset):
         mask = np.load(mask_path) # array [x, y]
 
 
-        # random filp
-        # if self.augment and random.random() < 0.5:
-        #     img = np.array(img).transpose(Image.FLIP_LEFT_RIGHT)
-        #     mask = np.array(mask).transpose(Image.FLIP_LEFT_RIGHT)
+        mask = transform.resize(mask, 
+                                (self.inp_size,self.inp_size), 
+                                order=0,
+                                preserve_range=True,
+                                mode='constant',
+                                anti_aliasing=False)
+        mask = torch.from_numpy(np.uint8(mask))
+
+        img = transform.resize(img, 
+                                (self.inp_size,self.inp_size), 
+                                order=3,
+                                preserve_range=True,
+                                mode='constant',
+                                anti_aliasing=False)
+        img = torch.from_numpy(img)
 
         return {
-            'image': self.img_transform(img),
-            'gt': self.mask_transform(mask),
-            'original_size': tuple(mask.shape),
+            'image': img,
+            'gt': mask,
+            'original_size':mask.shape,
         }
