@@ -6,6 +6,7 @@ import torch
 import numpy as np
 from torch.optim import SGD, Adam, AdamW
 from tensorboardX import SummaryWriter
+import torch.nn as nn
 
 import sod_metric
 class Averager():
@@ -361,3 +362,32 @@ def _eval_e(y_pred, y, num):
         enhanced = ((align_matrix + 1) * (align_matrix + 1)) / 4
         score[i] = torch.sum(enhanced) / (y.numel() - 1 + 1e-20)
     return score
+
+class BinaryDiceLoss(nn.Module):
+	def __init__(self):
+		super(BinaryDiceLoss, self).__init__()
+	
+	def forward(self, input, targets):
+		# 获取每个批次的大小 N
+		N = targets.size()[0]
+		# 平滑变量
+		smooth = 1
+		# 将宽高 reshape 到同一纬度
+		input_flat = input.view(N, -1)
+		targets_flat = targets.view(N, -1)
+	
+		# 计算交集
+		intersection = input_flat * targets_flat 
+		dice_eff = (2 * intersection.sum(1) + smooth) / (input_flat.sum(1) + targets_flat.sum(1) + smooth)
+		# 计算一个批次中平均每张图的损失
+		loss = 1 - dice_eff.sum() / N
+		return loss
+
+
+def iou_loss(pred, target):
+    pred = torch.sigmoid(pred)
+    inter = (pred * target).sum(dim=(2, 3))
+    union = (pred + target).sum(dim=(2, 3)) - inter
+    iou = 1 - (inter / union)
+
+    return iou.mean()

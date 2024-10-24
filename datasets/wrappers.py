@@ -56,8 +56,9 @@ class ValDataset(Dataset):
         mask = np.load(mask_path)
 
         return {
-            'inp': self.img_transform(img),
-            'gt': self.mask_transform(mask)
+            'image': self.img_transform(img),
+            'gt': self.mask_transform(mask),
+            'original_size': tuple(mask.shape),
         }
 
 
@@ -90,6 +91,7 @@ class TestDataset(Dataset):
         return {
             'image': self.img_transform(img),
             'gt': self.mask_transform(mask),
+            'original_size': tuple(mask.shape),
         }
 
 @register('train')

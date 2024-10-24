@@ -36,34 +36,6 @@ class BBCEWithLogitLoss(nn.Module):
 
         return loss
 
-class BinaryDiceLoss(nn.Module):
-	def __init__(self):
-		super(BinaryDiceLoss, self).__init__()
-	
-	def forward(self, input, targets):
-		# 获取每个批次的大小 N
-		N = targets.size()[0]
-		# 平滑变量
-		smooth = 1
-		# 将宽高 reshape 到同一纬度
-		input_flat = input.view(N, -1)
-		targets_flat = targets.view(N, -1)
-	
-		# 计算交集
-		intersection = input_flat * targets_flat 
-		N_dice_eff = (2 * intersection.sum(1) + smooth) / (input_flat.sum(1) + targets_flat.sum(1) + smooth)
-		# 计算一个批次中平均每张图的损失
-		loss = 1 - N_dice_eff.sum() / N
-		return loss
-
-
-def _iou_loss(pred, target):
-    pred = torch.sigmoid(pred)
-    inter = (pred * target).sum(dim=(2, 3))
-    union = (pred + target).sum(dim=(2, 3)) - inter
-    iou = 1 - (inter / union)
-
-    return iou.mean()
 
 @register('task_sam')
 class Task_SAM(nn.Module):
@@ -119,19 +91,19 @@ class Task_SAM(nn.Module):
         self.pixel_mean=encoder_mode['pixel_mean']
         self.pixel_std=encoder_mode['pixel_std']
 
-        self.loss_mode = loss
-        if self.loss_mode == 'bce':
-            self.criterionBCE = torch.nn.BCEWithLogitsLoss()
+        # self.loss_mode = loss
+        # if self.loss_mode == 'bce':
+        #     self.criterionBCE = torch.nn.BCEWithLogitsLoss()
 
-        elif self.loss_mode == 'bbce':
-            self.criterionBCE = BBCEWithLogitLoss()
+        # elif self.loss_mode == 'bbce':
+        #     self.criterionBCE = BBCEWithLogitLoss()
 
-        elif self.loss_mode == 'iou':
-            self.criterionBCE = torch.nn.BCEWithLogitsLoss()
-            self.criterionIOU = IOU()
+        # elif self.loss_mode == 'iou':
+        #     self.criterionBCE = torch.nn.BCEWithLogitsLoss()
+        #     self.criterionIOU = IOU()
         
-        self.criterionBCE = torch.nn.BCEWithLogitsLoss()
-        self.dice_loss = BinaryDiceLoss()
+        # self.criterionBCE = torch.nn.BCEWithLogitsLoss()
+        # self.dice_loss = BinaryDiceLoss()
     
     def forward(
         self,
@@ -140,13 +112,12 @@ class Task_SAM(nn.Module):
     )->List[Dict[str, torch.Tensor]]:
         images = batched_input['image'] #[B, C, H, W]
         input_images = [self.transform.apply_image(x) for x in images] # [B, H, W, C]
-        input_image_torch = torch.as_tensor(input_images, device=self.device, dtype=torch.float).permute(0, 3, 1, 2) # [B, C, H, W]
+        input_image_torch = torch.as_tensor(np.array(input_images), device=self.device, dtype=torch.float).permute(0, 3, 1, 2) # [B, C, H, W]
         input_image_torch = torch.stack([self.preprocess(input_image_torch[x]) for x in range(len(input_image_torch))], dim=0) # padding
 
         image_embeddings = self.image_encoder(input_image_torch) #[B, C, H, W]
         
-        
-        
+
         # for image_record, curr_embedding in zip(batched_input, image_embeddings):
             # if (image_record["point_coords"] is not None) or (image_record['boxes'] or image_record['mask_inputs']
         if "point_coords" in batched_input:
@@ -177,7 +148,9 @@ class Task_SAM(nn.Module):
                 "low_res_logits": low_res_masks,
             }
         
-            # self.pred_mask = low_res_masks
+        # if self.prompt_encoder.task_specific_embed.weight.requires_grad:
+        #     return self.backward_G(low_res_masks, batched_input['gt'])
+        
         return outputs
 
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
@@ -232,7 +205,7 @@ class Task_SAM(nn.Module):
         if self.loss_mode == 'iou':
             self.loss_G += self.criterionIOU(mask, gt)
 
-        self.loss_G.backward()
+        return self.loss_G
 
     def optimize_parameters(self):
         self.optimizer.zero_grad()  # set G's gradients to zero
