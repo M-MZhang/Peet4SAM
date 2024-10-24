@@ -65,7 +65,7 @@ def prepare_training():
 
     def loss_f(logits, gt):
         
-        loss = torch.nn.BCEWithLogitsLoss()(logits, gt) + BinaryDiceLoss()(logits, gt)
+        loss = torch.nn.BCEWithLogitsLoss()(logits, gt) + BinaryDiceLoss()(torch.sigmoid(logits), gt)
         if config['model']['args']['loss'] == 'iou':
             loss += iou_loss(logits, gt)
         
