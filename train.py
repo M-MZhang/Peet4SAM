@@ -1,7 +1,7 @@
 import argparse
 import os
 
-import torch.distributed
+# import torch.distributed
 import yaml
 from tqdm import tqdm
 from torch.utils.data import DataLoader
@@ -17,8 +17,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import time
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
-device_ids=[0, 1, 2, 3]
+os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3, 4, 5, 6, 7'
+device_ids=[0, 1, 2, 3, 4, 5, 6, 7]
 # torch.cuda.set_device('cuda:{}'.format(device_ids[0]))
 
 
