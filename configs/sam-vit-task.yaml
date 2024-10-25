@@ -5,13 +5,12 @@ dataset:
     bbox_shift: 20
    
 
-
 train_wrapper:
   name: train
   args:
     inp_size: 256
     augment: true
-  batch_size: 8
+  batch_size: 32
    
 
 val_wrapper:
@@ -19,14 +18,14 @@ val_wrapper:
     args:
       inp_size: 256
       augment: false
-    batch_size: 8
+    batch_size: 32
 
 test_wrapper:
     name: test
     args:
       inp_size: 256
       augment: false
-    batch_size: 8
+    batch_size: 32
 
 
     
@@ -89,5 +88,5 @@ multi_step_lr:
 epoch_val: 1
 epoch_save: 1
 
-#resume: 60
+# resume: 20
 #start_epoch: 60

@@ -50,11 +50,21 @@ def make_data_loaders():
 
 
 def prepare_training():
+    model = trainers.make(config['model']).cuda()
+    model_state_dict = model.state_dict()
+    sam_checkpoint = torch.load(config['sam_checkpoint'])
+    model_state_dict.update(sam_checkpoint)
+    model.load_state_dict(model_state_dict, strict=False)
+   
     if config.get('resume') is not None:
-        model = trainers.make(config['model']).cuda()
         epoch_start = config.get('resume') + 1
+        try:
+            task_specific_embed = torch.load(os.path.join(save_path, 'train', 'prompt_encoder_'+str(config['resume'])+'.pth'))
+            model.prompt_encoder.task_specific_embed.load_state_dict(task_specific_embed)
+        except FileExistsError:
+            print('No such file!')
+            raise
     else:
-        model = trainers.make(config['model']).cuda()
         epoch_start = 1
     
     if torch.cuda.device_count() > 1:
@@ -63,19 +73,21 @@ def prepare_training():
     optimizer = utils.make_optimizer(
             model.parameters(), config['optimizer'])
 
-    def loss_f(logits, gt):
-        
-        loss = torch.nn.BCEWithLogitsLoss()(logits, gt) + BinaryDiceLoss()(torch.sigmoid(logits), gt)
-        if config['model']['args']['loss'] == 'iou':
-            loss += iou_loss(logits, gt)
-        
-        return loss
-     
     max_epoch = config.get('epoch_max')
     lr_scheduler = CosineAnnealingLR(optimizer, max_epoch, eta_min=config.get('lr_min'))
     
     log('model: #params={}'.format(utils.compute_num_params(model, text=True)))
-    return model, optimizer, epoch_start, lr_scheduler, loss_f
+    return model, optimizer, epoch_start, lr_scheduler
+
+
+def loss_f(logits, gt):
+        
+    # loss = torch.nn.BCEWithLogitsLoss()(logits, gt.float()) + BinaryDiceLoss()(logits, gt)
+    # if config['model']['args']['loss'] == 'iou':
+    #     loss += iou_loss(logits, gt)
+    loss = iou_loss(logits, gt) + torch.nn.BCEWithLogitsLoss()(logits, gt.float())
+        
+    return loss
 
 
 
@@ -86,7 +98,7 @@ def train(train_loader, model, optimizer, loss_f):
     
     loss_list = []
     for batch in train_loader:
-        high_img = batch['image'].to('cuda') #[B, C, H, W]
+        high_img = batch['image'].to('cuda') #[B, H, W, C]
         gt = batch['gt'].to('cuda')
 
         outputs = model.forward(batch)
@@ -125,14 +137,17 @@ def eval_psnr(loader, model, loss_f, eval_type=None):
     
     pbar = tqdm(total=len(loader), leave=False, desc='val')
     
-    loss_list = []
+    dice_loss_list = []
+    iou_loss_list = []
+    dice_loss = BinaryDiceLoss()
+
     for batch in loader:
         high_img = batch['image'].to('cuda') #[B, C, H, W]
         gt = batch['gt'].to('cuda')
 
         pred = model.forward(batch)['low_res_logits']
-        loss = loss_f(pred, gt)
-        loss_list.append(loss.item())
+        dice_loss_list.append(dice_loss(pred, gt).item())
+        iou_loss_list.append(iou_loss(pred, gt).item())
 
         if pbar is not None:
             pbar.update(1)
@@ -140,7 +155,7 @@ def eval_psnr(loader, model, loss_f, eval_type=None):
     if pbar is not None:
         pbar.close()
 
-    return loss_list
+    return mean(dice_loss_list), mean(iou_loss_list)
 
 
 def main(config_, save_path, args):
@@ -157,17 +172,9 @@ def main(config_, save_path, args):
             'gt': {'sub': [0], 'div': [1]}
         }
 
-    model, optimizer, epoch_start, lr_scheduler, loss = prepare_training()
+    model, optimizer, epoch_start, lr_scheduler = prepare_training()
     model.optimizer = optimizer
 
-    sam_checkpoint = torch.load(config['sam_checkpoint'])
-    model.load_state_dict(sam_checkpoint, strict=False)
-    if config.get('resume') is not None: # load task_spesific_embed in 
-        task_specific_embed = torch.load(os.path.join(save_path, "prompt_epoch_"+str(config['resume'])+".pth"))
-        model.load_state_dict(task_specific_embed, strict=False)
-
-    
-    # model = model.module
 
     for name, para in model.named_parameters():
         if "task_specific_embed" not in name:
@@ -188,7 +195,7 @@ def main(config_, save_path, args):
     for epoch in range(epoch_start, epoch_max + 1):
         # train_loader.sampler.set_epoch(epoch)
         t_epoch_start = timer.t()
-        train_loss_G = train(train_loader, model, optimizer, loss)
+        train_loss_G = train(train_loader, model, optimizer, loss_f)
         lr_scheduler.step()
 
         
@@ -206,12 +213,12 @@ def main(config_, save_path, args):
         
         if (epoch_val is not None) and (epoch % epoch_val == 0):
            
-            loss_list = eval_psnr(val_loader, model, loss, eval_type=config.get('eval_type'))
-            dice_loss = mean(loss_list)
-              
+            dice_loss, iou_loss = eval_psnr(val_loader, model, loss_f, eval_type=config.get('eval_type'))
+            
             log_info.append('dice_loss: {:.4f}'.format(dice_loss))
-            # dice_loss = 1
             writer.add_scalar('dice_loss',dice_loss, epoch)
+            log_info.append('iou_loss:{:4f}'.format(iou_loss))
+            writer.add_scalar('iou_loss', iou_loss, epoch)
 
             if dice_loss < min_loss:
                 min_loss = dice_loss
@@ -230,10 +237,10 @@ def main(config_, save_path, args):
 def save(config, model, save_path, name):
     if config['model']['name'] == 'task_sam':
             task_specific_prompt = model.module.prompt_encoder.task_specific_embed.state_dict()
-            torch.save({"prompt_encoder.task_specific_embed": task_specific_prompt},
-                       os.path.join(save_path, f"prompt_epoch_{name}.pth"))
+            torch.save(task_specific_prompt,
+                       os.path.join(save_path, 'train', f"prompt_epoch_{name}.pth"))
     else:
-        torch.save(model.state_dict(), os.path.join(save_path, f"model_epoch_{name}.pth"))
+        torch.save(model.state_dict(), os.path.join(save_path, 'train', f"model_epoch_{name}.pth"))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -254,6 +261,6 @@ if __name__ == '__main__':
         save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
     if args.tag is not None:
         save_name += '_' + args.tag
-    save_path = os.path.join('../save', save_name, now_time)
+    save_path = os.path.join('../save', save_name)
 
     main(config, save_path, args=args)

@@ -51,12 +51,12 @@ class ValDataset(Dataset):
         mask = np.load(mask_path)
         
         mask = transform.resize(mask, 
-                                (1024, 1024), 
+                                (self.inp_size, self.inp_size), 
                                 order=0,
                                 preserve_range=True,
                                 mode='constant',
                                 anti_aliasing=False)
-        mask = torch.from_numpy(np.uint8(mask))
+        mask = torch.from_numpy(np.uint8(mask)).unsqueeze(0)
 
         img = transform.resize(img, 
                                 (self.inp_size,self.inp_size), 
@@ -96,12 +96,12 @@ class TestDataset(Dataset):
         mask = np.load(mask_path)
 
         mask = transform.resize(mask, 
-                                (1024, 1024), 
+                                (self.inp_size, self.inp_size), 
                                 order=0,
                                 preserve_range=True,
                                 mode='constant',
                                 anti_aliasing=False)
-        mask = torch.from_numpy(np.uint8(mask))
+        mask = torch.from_numpy(np.uint8(mask)).unsqueeze(0)
 
         img = transform.resize(img, 
                                 (self.inp_size,self.inp_size), 
@@ -159,7 +159,7 @@ class TrainDataset(Dataset):
                                 preserve_range=True,
                                 mode='constant',
                                 anti_aliasing=False)
-        mask = torch.from_numpy(np.uint8(mask))
+        mask = torch.from_numpy(np.uint8(mask)).unsqueeze(0)
 
         img = transform.resize(img, 
                                 (self.inp_size,self.inp_size), 

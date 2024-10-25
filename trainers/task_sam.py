@@ -112,8 +112,8 @@ class Task_SAM(nn.Module):
         batched_input: List[Dict[str, Any]],
         multimask_output: bool=False,
     )->List[Dict[str, torch.Tensor]]:
-        images = batched_input['image'] #[B, C, H, W]
-        input_images = [self.transform.apply_image(x) for x in images] # [B, H, W, C]
+        images = batched_input['image'] #[B, H, W, C]
+        input_images = [self.transform.apply_image(x.permute(2, 0, 1)) for x in images] # [B, H, W, C]
         input_image_torch = torch.as_tensor(np.array(input_images), device=self.device, dtype=torch.float).permute(0, 3, 1, 2) # [B, C, H, W]
         input_image_torch = torch.stack([self.preprocess(input_image_torch[x]) for x in range(len(input_image_torch))], dim=0) # padding
 
