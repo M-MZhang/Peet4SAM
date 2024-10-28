@@ -173,10 +173,12 @@ def main(config_, save_path, args):
 
 
     for name, para in model.named_parameters():
-        if "task_specific_embed" not in name:
+        if ("task_specific_embed" not in name) and ("adapter" not in name) and ("prompt_adapter" not in name):
             para.requires_grad_(False)
         else:
             print(name)
+        
+
     
     model_total_params = sum(p.numel() for p in model.parameters())
     model_grad_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -235,7 +237,7 @@ def main(config_, save_path, args):
 
 def save(config, model, save_path, name):
     if config['model']['name'] == 'task_sam':
-            task_specific_prompt = model.module.prompt_encoder.task_specific_embed.state_dict()
+            task_specific_prompt = model.module.task_specific_embed.state_dict()
             torch.save(task_specific_prompt,
                        os.path.join(save_path, f"prompt_epoch_{name}.pth"))
     else:

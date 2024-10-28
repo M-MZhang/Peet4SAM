@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from typing import Any, Dict, List, Tuple
 
 from .build import register
-from .modules import ImageEncoderViT, TwoWayTransformer, PromptEncoder_task, MaskDecoder
+from .modules import ImageEncoderViT_task, TwoWayTransformer, PromptEncoder_task, MaskDecoder
 from .iou_loss import IOU
 from .utils.transforms import ResizeLongestSide
 
@@ -49,8 +49,12 @@ class Task_SAM(nn.Module):
         self.original_size = inp_size
         self.register_buffer("pixel_mean", torch.Tensor(encoder_mode['pixel_mean']).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor(encoder_mode['pixel_std']).view(-1, 1, 1), False)
+
+
+        # 不一定是一个，但是先用一个做
+        self.task_specific_embed = nn.Embedding(1, self.embed_dim)
         
-        self.image_encoder = ImageEncoderViT(
+        self.image_encoder = ImageEncoderViT_task(
             depth=encoder_mode['depth'],
             embed_dim=encoder_mode['embed_dim'],
             img_size=encoder_mode['img_size'],
@@ -74,7 +78,8 @@ class Task_SAM(nn.Module):
             image_embedding_size=(image_embedding_size, image_embedding_size),
             input_image_size=(encoder_mode['img_size'], encoder_mode['img_size']),
             mask_in_chans=16,
-            task_num=encoder_mode['task_num']
+            task_num=encoder_mode['task_num'],
+            image_embed_dim=encoder_mode['embed_dim']
         )
 
         self.mask_decoder=MaskDecoder(
@@ -101,7 +106,7 @@ class Task_SAM(nn.Module):
         input_images_torch = input_images_torch.contiguous()
         input_images_torch = torch.stack([self.preprocess(input_images_torch[x]) for x in range(len(input_images_torch))], dim=0) # padding
 
-        image_embeddings = self.image_encoder(input_images_torch) #[B, C, H, W]
+        image_embeddings = self.image_encoder(input_images_torch, self.task_specific_embed.weight) #[B, C, H, W]
         
 
         # for image_record, curr_embedding in zip(batched_input, image_embeddings):
@@ -114,6 +119,7 @@ class Task_SAM(nn.Module):
             points=points,
             boxes=batched_input.get("boxes", None),
             masks=batched_input.get("mask_inputs", None),
+            task_specific_embed=self.task_specific_embed.weight,
         )
         low_res_masks, iou_predictions = self.mask_decoder(
             image_embeddings=image_embeddings,#[B, C, H, W]

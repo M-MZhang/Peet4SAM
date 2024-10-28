@@ -223,6 +223,7 @@ class PromptEncoder_task(nn.Module):
         input_image_size: Tuple[int, int],
         mask_in_chans: int,
         task_num: int=1,
+        image_embed_dim: int=768,
         activation: Type[nn.Module] = nn.GELU,
     ) -> None:
         """
@@ -265,7 +266,13 @@ class PromptEncoder_task(nn.Module):
         self.no_mask_embed = nn.Embedding(1, embed_dim)
 
         ########### creat task specific embedding #########
-        self.task_specific_embed = nn.Embedding(task_num, embed_dim)
+        # self.task_specific_embed = nn.Embedding(task_num, embed_dim)
+        # task_specific_embed was created before prompt_encoder in task_sam_v2, but need an adpater
+        self.prompt_adapter = nn.Sequential(
+            nn.Linear(image_embed_dim, embed_dim),
+            nn.GELU(),
+            nn.Linear(embed_dim, embed_dim)
+        )
 
     def get_dense_pe(self) -> torch.Tensor:
         """
@@ -338,6 +345,7 @@ class PromptEncoder_task(nn.Module):
         points: Optional[Tuple[torch.Tensor, torch.Tensor]],
         boxes: Optional[torch.Tensor],
         masks: Optional[torch.Tensor],
+        task_specific_embed: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Embeds different types of prompts, returning both sparse and dense
@@ -373,11 +381,14 @@ class PromptEncoder_task(nn.Module):
                 bs, -1, self.image_embedding_size[0], self.image_embedding_size[1]
             ) #[bs, 256, 64, 64]
         
-        task_specific_embedings = self.task_specific_embed.weight.unsqueeze(0).expand(
-                bs, self.task_num, self.embed_dim
-        ) #[B, task_num, C] 1 1 256
+        # task_specific_embedings = self.task_specific_embed.weight.unsqueeze(0).expand(
+        #         bs, self.task_num, self.embed_dim
+        # ) #[B, task_num, C] 1 1 256
+        task_specific_embeddings = self.prompt_adapter(task_specific_embed).unsqueeze(0).expand(
+            bs, self.task_num, self.embed_dim
+        ) #[1, 1, 256]
         
-        sparse_embeddings = torch.cat([sparse_embeddings, task_specific_embedings], dim=1)
+        sparse_embeddings = torch.cat([sparse_embeddings, task_specific_embeddings], dim=1)
 
         return sparse_embeddings, dense_embeddings
                 #[B, N+task_num, C]       #[1, C, H, W]         
