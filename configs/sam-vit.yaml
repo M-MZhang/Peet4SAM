@@ -1,0 +1,91 @@
+dataset:
+  name: kvasir_seg
+  args:
+    data_root: /root/data1/zmm/seg4medicine/data
+    bbox_shift: 20
+   
+
+train_wrapper:
+  name: train
+  args:
+    inp_size: 256
+    augment: true
+  batch_size: 16
+   
+
+val_wrapper:
+    name: val
+    args:
+      inp_size: 256
+      augment: false
+    batch_size: 16
+
+test_wrapper:
+    name: test
+    args:
+      inp_size: 256
+      augment: false
+    batch_size: 16
+
+
+    
+eval_type: cod
+sam_checkpoint: pretrained/sam_vit_b_01ec64.pth
+data_norm:
+  inp:
+    sub:
+    - 0.5
+    div:
+    - 0.5
+  gt:
+    sub:
+    - 0.5
+    div:
+    - 0.5
+  gt_rgb:
+    sub:
+    - 0.5
+    div:
+    - 0.5
+
+model:
+  name: sam
+  args:
+    inp_size: 256
+    encoder_mode:
+      img_size: 1024
+      mlp_ratio: 4
+      patch_size: 16
+      qkv_bias: true
+      use_rel_pos: true
+      window_size: 14
+      out_chans: 256
+      scale_factor: 32
+      prompt_embed_dim: 256
+      embed_dim: 768
+      depth: 12
+      num_heads: 12
+      task_num: 1
+      pixel_mean: [123.675, 116.28, 103.53]
+      pixel_std: [58.395, 57.12, 57.375]
+      global_attn_indexes:
+      - 2
+      - 5
+      - 8
+      - 11
+optimizer:
+  name: adamw
+  args:
+    lr: 0.0002
+lr_min: 1.0e-7
+epoch_max: 20
+
+multi_step_lr:
+  milestones:
+  - 1
+  gamma: 0.1
+epoch_val: 1
+epoch_save: 1
+
+# resume: 20
+#start_epoch: 60

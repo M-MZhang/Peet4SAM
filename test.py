@@ -17,9 +17,9 @@ import torch.distributed as dist
 import torch.nn as nn
 import time
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3, 4, 5, 6, 7'
-device_ids=[0, 1, 2, 3, 4, 5, 6, 7]
-# torch.cuda.set_device('cuda:{}'.format(device_ids[0]))
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
+device_ids=[0, 1, 2, 3]
+
 
 
 def make_data_loader(spec, dataset_source, tag=''):
@@ -44,7 +44,7 @@ def make_data_loader(spec, dataset_source, tag=''):
 
 def make_data_loaders():
     dataset = datasets.make(config.get('dataset'))
-    test_loader = make_data_loader(config.get('test_wrapper'), dataset_source=dataset.test, tag='test')
+    test_loader = make_data_loader(config.get('test_wrapper'), dataset_source=dataset, tag='test')
     return test_loader
 
 def evaluate(loader, model, eval_type=None):
@@ -60,7 +60,7 @@ def evaluate(loader, model, eval_type=None):
         gt = batch['gt'].to('cuda')
 
         pred = model.forward(batch)
-        loss_1 = dice_loss(pred['low_res_logits'], gt) #
+        loss_1 = dice_loss(pred['low_res_logits'], gt) 
         loss_2 = iou_loss(pred['low_res_logits'], gt)
         dice_loss_list.append(loss_1.item())
         iou_loss_list.append(loss_2.item())
@@ -82,20 +82,16 @@ def main(config_, save_path, args):
         yaml.dump(config, f, sort_keys=False)
     
     test_loader = make_data_loaders()
-    if config.get('data_norm') is None:
-        config['data_norm'] = {
-            'inp': {'sub': [0], 'div': [1]},
-            'gt': {'sub': [0], 'div': [1]}
-        }
+    
     sam_checkpoint = torch.load(config['sam_checkpoint'])
     model = trainers.make(config['model']).cuda()
     model_state_dict = model.state_dict()
     model_state_dict.update(sam_checkpoint)
-    model.load_state_dict(model_state_dict, strict=False)
+    model.load_state_dict(model_state_dict)
 
     if config.get('resume') is not None:
         try:
-            task_specific_embed = torch.load(os.path.join(save_path,'train', "prompt_epoch_"+str(config['resume'])+".pth"))
+            task_specific_embed = torch.load(os.path.join('save',args.name, 'train', "prompt_epoch_"+str(config['resume'])+".pth"))
             model.prompt_encoder.task_specific_embed.load_state_dict(task_specific_embed, strict=False)
         except FileNotFoundError:
             print ("File does not exist!")
@@ -106,8 +102,8 @@ def main(config_, save_path, args):
     dice_loss, iou_loss = evaluate(test_loader, model)
 
     log_info = ['Test result for {}/{}'.format(args.name, config.get('resume'))]
-    log_info = ['Dice loss: {}'.format(dice_loss)]
-    log_info = ['Iou loss: {}'.format(iou_loss)]
+    log_info.append(['Dice loss: {}'.format(dice_loss)])
+    log_info.append(['Iou loss: {}'.format(iou_loss)])
 
     log(','.join(log_info))
     writer.flush
@@ -135,6 +131,6 @@ if __name__ == '__main__':
         save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
     if args.tag is not None:
         save_name += '_' + args.tag
-    save_path = os.path.join('../save', save_name, 'test')
+    save_path = os.path.join('save', save_name, 'test')
 
     main(config, save_path, args=args)

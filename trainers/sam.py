@@ -7,23 +7,23 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+import numpy as np
 
 from typing import Any, Dict, List, Tuple
 
-from .modules.image_encoder import ImageEncoderViT
-from .modules.mask_decoder import MaskDecoder
-from .modules.prompt_encoder import PromptEncoder
+from .modules import ImageEncoderViT, TwoWayTransformer, PromptEncoder, MaskDecoder
+from .utils.transforms import ResizeLongestSide
+from .build import register
 
-
+@register('sam')
 class Sam(nn.Module):
     mask_threshold: float = 0.0
     image_format: str = "RGB"
 
     def __init__(
         self,
-        image_encoder: ImageEncoderViT,
-        prompt_encoder: PromptEncoder,
-        mask_decoder: MaskDecoder,
+        inp_size=None, 
+        encoder_mode=None,
         pixel_mean: List[float] = [123.675, 116.28, 103.53],
         pixel_std: List[float] = [58.395, 57.12, 57.375],
     ) -> None:
@@ -40,9 +40,48 @@ class Sam(nn.Module):
           pixel_std (list(float)): Std values for normalizing pixels in the input image.
         """
         super().__init__()
-        self.image_encoder = image_encoder
-        self.prompt_encoder = prompt_encoder
-        self.mask_decoder = mask_decoder
+
+        self.image_encoder = ImageEncoderViT(
+            depth=encoder_mode['depth'],
+            embed_dim=encoder_mode['embed_dim'],
+            img_size=encoder_mode['img_size'],
+            mlp_ratio=encoder_mode['mlp_ratio'],
+            norm_layer=torch.nn.LayerNorm,
+            act_layer=nn.GELU,
+            num_heads=encoder_mode['num_heads'],
+            patch_size=encoder_mode['patch_size'],
+            qkv_bias=encoder_mode['qkv_bias'],
+            use_rel_pos=encoder_mode['use_rel_pos'],
+            global_attn_indexes=encoder_mode['global_attn_indexes'],
+            window_size=encoder_mode['window_size'],
+            out_chans=encoder_mode['out_chans'],
+            rel_pos_zero_init=True,
+        )
+
+        image_embedding_size = encoder_mode['img_size'] // encoder_mode['patch_size']
+
+        self.prompt_encoder = PromptEncoder(
+            embed_dim=encoder_mode['prompt_embed_dim'],
+            image_embedding_size=(image_embedding_size, image_embedding_size),
+            input_image_size=(encoder_mode['img_size'], encoder_mode['img_size']),
+            mask_in_chans=16,
+        )
+
+        self.mask_decoder=MaskDecoder(
+            num_multimask_outputs=3,
+            transformer=TwoWayTransformer(
+                depth=2,
+                embedding_dim=encoder_mode['prompt_embed_dim'],
+                mlp_dim=2048,
+                num_heads=8,
+            ),
+            transformer_dim=encoder_mode['prompt_embed_dim'],
+            iou_head_depth=3,
+            iou_head_hidden_dim=256,
+        )
+
+        self.transform = ResizeLongestSide(encoder_mode['img_size'])
+        self.original_size = inp_size
         self.register_buffer("pixel_mean", torch.Tensor(pixel_mean).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor(pixel_std).view(-1, 1, 1), False)
 
@@ -54,7 +93,7 @@ class Sam(nn.Module):
     def forward(
         self,
         batched_input: List[Dict[str, Any]],
-        multimask_output: bool,
+        multimask_output: bool=False,
     ) -> List[Dict[str, torch.Tensor]]:
         """
         Predicts masks end-to-end from provided images and prompts.
@@ -94,40 +133,43 @@ class Sam(nn.Module):
                 shape BxCxHxW, where H=W=256. Can be passed as mask input
                 to subsequent iterations of prediction.
         """
-        input_images = torch.stack([self.preprocess(x["image"]) for x in batched_input], dim=0)
-        image_embeddings = self.image_encoder(input_images) #[B, C, H, W]
+        images = batched_input['image'] #[B, H, W, C]
+        input_images_torch = self.transform.apply_image_torch(images.permute(0, 3, 1, 2))
+        input_images_torch = input_images_torch.contiguous()
+        input_images_torch = torch.stack([self.preprocess(input_images_torch[x]) for x in range(len(input_images_torch))], dim=0) # padding
+        
+        image_embeddings = self.image_encoder(input_images_torch) #[B, C, H, W]
 
-        outputs = []
-        for image_record, curr_embedding in zip(batched_input, image_embeddings):
-            if "point_coords" in image_record:
-                points = (image_record["point_coords"], image_record["point_labels"])
-            else:
-                points = None
-            sparse_embeddings, dense_embeddings = self.prompt_encoder(
-                points=points,
-                boxes=image_record.get("boxes", None),
-                masks=image_record.get("mask_inputs", None),
-            )
-            low_res_masks, iou_predictions = self.mask_decoder(
-                image_embeddings=curr_embedding.unsqueeze(0),#[1, C, H, W]
-                image_pe=self.prompt_encoder.get_dense_pe(), #[1, C, H, W]
-                sparse_prompt_embeddings=sparse_embeddings, #[1, N, C] 
-                dense_prompt_embeddings=dense_embeddings,  #[1, C, H, W]
-                multimask_output=multimask_output,
-            )
-            masks = self.postprocess_masks(
-                low_res_masks,
-                input_size=image_record["image"].shape[-2:],
-                original_size=image_record["original_size"],
-            )
-            masks = masks > self.mask_threshold
-            outputs.append(
-                {
-                    "masks": masks,
-                    "iou_predictions": iou_predictions,
-                    "low_res_logits": low_res_masks,
-                }
-            )
+        
+        # for image_record, curr_embedding in zip(batched_input, image_embeddings):
+        if "point_coords" in batched_input:
+            points = (batched_input["point_coords"], batched_input["point_labels"])
+        else:
+            points = None
+        sparse_embeddings, dense_embeddings = self.prompt_encoder(
+            points=points,
+            boxes=batched_input.get("boxes", None),
+            masks=batched_input.get("mask_inputs", None),
+        )
+        low_res_masks, iou_predictions = self.mask_decoder(
+            image_embeddings=image_embeddings,#[1, C, H, W]
+            image_pe=self.prompt_encoder.get_dense_pe(), #[1, C, H, W]
+            sparse_prompt_embeddings=sparse_embeddings, #[1, N, C] 
+            dense_prompt_embeddings=dense_embeddings,  #[1, C, H, W]
+            multimask_output=multimask_output,
+        )
+        masks = self.postprocess_masks(
+            low_res_masks,
+            input_size=input_images_torch.shape[-2:],
+            original_size=self.original_size,
+        )
+        masks = masks > self.mask_threshold
+        outputs={
+                "masks": masks,
+                "iou_predictions": iou_predictions,
+                "low_res_logits": low_res_masks,
+            }
+        
         return outputs
 
     def postprocess_masks(
@@ -158,13 +200,13 @@ class Sam(nn.Module):
             align_corners=False,
         )
         masks = masks[..., : input_size[0], : input_size[1]]
-        masks = F.interpolate(masks, original_size, mode="bilinear", align_corners=False)
+        masks = F.interpolate(masks, (original_size, original_size), mode="bilinear", align_corners=False)
         return masks
 
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
         """Normalize pixel values and pad to a square input."""
         # Normalize colors
-        x = (x - self.pixel_mean) / self.pixel_std
+        # x = (x - self.pixel_mean) / self.pixel_std
 
         # Pad
         h, w = x.shape[-2:]

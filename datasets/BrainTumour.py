@@ -11,7 +11,7 @@ from .uitls import mkdir_if_missing, Datum, read_json, write_json
 
 @register('braintumour')
 class Myeloma:
-    def __init__(self, data_root, ratios=[0.7, 0.2, 0.1], bbox_shift=20):
+    def __init__(self, data_root, ratios=[0.7, 0.1, 0.2], bbox_shift=20):
         self.data_root = join(data_root, "BrainTumour", "npy")
         self.gt_path = join(self.data_root, "gts")
         self.img_path = join(self.data_root, "imgs")
@@ -65,7 +65,7 @@ class Myeloma:
                 item_gt_path = join(gt_path, item_gt_path)
                 item_high_path = join(high_path, item_high_path)
                 # item = Datum(gt_path=item_gt_path, high_path=item_high_path)
-                item = (item_gt_path, item_high_path)
+                item = (item_high_path, item_gt_path)
                 out.append(item)
             return out
 

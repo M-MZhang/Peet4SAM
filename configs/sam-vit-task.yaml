@@ -1,5 +1,5 @@
 dataset:
-  name: braintumour
+  name: kvasir_seg
   args:
     data_root: /root/data1/zmm/seg4medicine/data
     bbox_shift: 20
@@ -10,7 +10,7 @@ train_wrapper:
   args:
     inp_size: 256
     augment: true
-  batch_size: 32
+  batch_size: 64
    
 
 val_wrapper:
@@ -18,14 +18,14 @@ val_wrapper:
     args:
       inp_size: 256
       augment: false
-    batch_size: 32
+    batch_size: 64
 
 test_wrapper:
     name: test
     args:
       inp_size: 256
       augment: false
-    batch_size: 32
+    batch_size: 64
 
 
     
@@ -79,7 +79,7 @@ optimizer:
   args:
     lr: 0.0002
 lr_min: 1.0e-7
-epoch_max: 20
+epoch_max: 50
 
 multi_step_lr:
   milestones:
@@ -88,5 +88,5 @@ multi_step_lr:
 epoch_val: 1
 epoch_save: 1
 
-# resume: 20
-#start_epoch: 60
+resume: 20
+start_epoch: 20

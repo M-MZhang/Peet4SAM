@@ -31,10 +31,10 @@ def make_data_loader(spec, dataset_source, tag=''):
     elif tag == 'val':
         wrapper = datasets.make(spec, args={'dataset': dataset_source})
    
-    log('{} dataset: size={}'.format(tag, len(wrapper)))
+    log('{} dataset: size={}'.format(tag, len(wrapper)), filename)
     for k, v in wrapper[0].items():
         if k!='original_size':
-            log('  {}: shape={}'.format(k, v.shape))
+            log('  {}: shape={}'.format(k, v.shape), filename)
 
     # sampler = torch.utils.data.distributed.DistributedSampler(wrapper)
     loader = DataLoader(wrapper, batch_size=spec['batch_size'],
@@ -44,8 +44,8 @@ def make_data_loader(spec, dataset_source, tag=''):
 
 def make_data_loaders():
     dataset = datasets.make(config.get('dataset'))
-    train_loader = make_data_loader(config.get('train_wrapper'), dataset_source=dataset.train, tag='train')
-    val_loader = make_data_loader(config.get('val_wrapper'), dataset_source=dataset.val, tag='val')
+    train_loader = make_data_loader(config.get('train_wrapper'), dataset_source=dataset, tag='train')
+    val_loader = make_data_loader(config.get('val_wrapper'), dataset_source=dataset, tag='val')
     return train_loader, val_loader
 
 
@@ -59,7 +59,7 @@ def prepare_training():
     if config.get('resume') is not None:
         epoch_start = config.get('resume') + 1
         try:
-            task_specific_embed = torch.load(os.path.join(save_path, 'train', 'prompt_encoder_'+str(config['resume'])+'.pth'))
+            task_specific_embed = torch.load(os.path.join(save_path, 'prompt_epoch_'+str(config['resume'])+'.pth'))
             model.prompt_encoder.task_specific_embed.load_state_dict(task_specific_embed)
         except FileExistsError:
             print('No such file!')
@@ -76,22 +76,13 @@ def prepare_training():
     max_epoch = config.get('epoch_max')
     lr_scheduler = CosineAnnealingLR(optimizer, max_epoch, eta_min=config.get('lr_min'))
     
-    log('model: #params={}'.format(utils.compute_num_params(model, text=True)))
+    log('model: #params={}'.format(utils.compute_num_params(model, text=True)), filename)
     return model, optimizer, epoch_start, lr_scheduler
 
 
-def loss_f(logits, gt):
-        
-    # loss = torch.nn.BCEWithLogitsLoss()(logits, gt.float()) + BinaryDiceLoss()(logits, gt)
-    # if config['model']['args']['loss'] == 'iou':
-    #     loss += iou_loss(logits, gt)
-    loss = iou_loss(logits, gt) + torch.nn.BCEWithLogitsLoss()(logits, gt.float())
-        
-    return loss
 
 
-
-def train(train_loader, model, optimizer, loss_f):
+def train(train_loader, model, optimizer, ce_loss, dice_loss):
     model.train()
     
     pbar = tqdm(total=len(train_loader), leave=False, desc='train')
@@ -103,7 +94,7 @@ def train(train_loader, model, optimizer, loss_f):
 
         outputs = model.forward(batch)
         optimizer.zero_grad()
-        loss = loss_f(outputs['low_res_logits'], gt)
+        loss = ce_loss(outputs['low_res_logits'], gt.float()) + dice_loss(outputs['low_res_logits'], gt)
         loss.backward()
         optimizer.step()
         
@@ -118,7 +109,7 @@ def train(train_loader, model, optimizer, loss_f):
     return mean(loss_list)
 
 
-def eval_psnr(loader, model, loss_f, eval_type=None):
+def eval_psnr(loader, model, dice_loss, eval_type=None):
     model.eval()
 
     if eval_type == 'f1':
@@ -139,7 +130,6 @@ def eval_psnr(loader, model, loss_f, eval_type=None):
     
     dice_loss_list = []
     iou_loss_list = []
-    dice_loss = BinaryDiceLoss()
 
     for batch in loader:
         high_img = batch['image'].to('cuda') #[B, C, H, W]
@@ -159,9 +149,15 @@ def eval_psnr(loader, model, loss_f, eval_type=None):
 
 
 def main(config_, save_path, args):
-    global config, log, writer, log_info
+    global config, log, writer, log_info, filename
     config = config_
     log, writer = utils.set_save_path(save_path, remove=False)
+    if os.path.exists(os.path.join(save_path, 'log.txt')):
+            now_time = time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime())
+            filename = 'log_' + now_time + '.txt'
+    else:
+        filename = 'log.txt'
+    
     with open(os.path.join(save_path, 'config.yaml'), 'w') as f:
         yaml.dump(config, f, sort_keys=False)
     
@@ -193,9 +189,10 @@ def main(config_, save_path, args):
     timer = utils.Timer()
 
     for epoch in range(epoch_start, epoch_max + 1):
-        # train_loader.sampler.set_epoch(epoch)
+        ce_loss = torch.nn.BCEWithLogitsLoss()
+        dice_loss = BinaryDiceLoss()
         t_epoch_start = timer.t()
-        train_loss_G = train(train_loader, model, optimizer, loss_f)
+        train_loss_G = train(train_loader, model, optimizer, ce_loss, dice_loss)
         lr_scheduler.step()
 
         
@@ -208,20 +205,22 @@ def main(config_, save_path, args):
         model_spec['sd'] = model.state_dict()
         optimizer_spec = config['optimizer']
         optimizer_spec['sd'] = optimizer.state_dict()
-
+            
         save(config, model, save_path, 'last')
         
         if (epoch_val is not None) and (epoch % epoch_val == 0):
            
-            dice_loss, iou_loss = eval_psnr(val_loader, model, loss_f, eval_type=config.get('eval_type'))
+            dice_loss, iou_loss = eval_psnr(val_loader, model, dice_loss, eval_type=config.get('eval_type'))
             
             log_info.append('dice_loss: {:.4f}'.format(dice_loss))
             writer.add_scalar('dice_loss',dice_loss, epoch)
             log_info.append('iou_loss:{:4f}'.format(iou_loss))
             writer.add_scalar('iou_loss', iou_loss, epoch)
-
+        
             if dice_loss < min_loss:
                 min_loss = dice_loss
+            
+            if epoch % 10 == 0:
                 save(config, model, save_path, str(epoch))
             
             t = timer.t()
@@ -230,7 +229,7 @@ def main(config_, save_path, args):
             t_elapsed, t_all = utils.time_text(t), utils.time_text(t / prog)
             log_info.append('{} {}/{}'.format(t_epoch, t_elapsed, t_all))
 
-            log(', '.join(log_info))
+            log(', '.join(log_info), filename)
             writer.flush()
 
 
@@ -238,9 +237,9 @@ def save(config, model, save_path, name):
     if config['model']['name'] == 'task_sam':
             task_specific_prompt = model.module.prompt_encoder.task_specific_embed.state_dict()
             torch.save(task_specific_prompt,
-                       os.path.join(save_path, 'train', f"prompt_epoch_{name}.pth"))
+                       os.path.join(save_path, f"prompt_epoch_{name}.pth"))
     else:
-        torch.save(model.state_dict(), os.path.join(save_path, 'train', f"model_epoch_{name}.pth"))
+        torch.save(model.state_dict(), os.path.join(save_path, f"model_epoch_{name}.pth"))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -253,14 +252,12 @@ if __name__ == '__main__':
 
     with open(args.config, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
-
-
-    now_time = time.strftime('%Y-%m-%d-%H-%M-%S', time.localtime())
+    
     save_name = args.name
     if save_name is None:
         save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
     if args.tag is not None:
         save_name += '_' + args.tag
-    save_path = os.path.join('../save', save_name)
+    save_path = os.path.join('../save', save_name, 'train')
 
     main(config, save_path, args=args)

@@ -46,6 +46,7 @@ class Task_SAM(nn.Module):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.transform = ResizeLongestSide(encoder_mode['img_size'])
         self.embed_dim = encoder_mode['embed_dim']
+        self.original_size = inp_size
         self.register_buffer("pixel_mean", torch.Tensor(encoder_mode['pixel_mean']).view(-1, 1, 1), False)
         self.register_buffer("pixel_std", torch.Tensor(encoder_mode['pixel_std']).view(-1, 1, 1), False)
         
@@ -71,7 +72,7 @@ class Task_SAM(nn.Module):
         self.prompt_encoder = PromptEncoder_task(
             embed_dim=encoder_mode['prompt_embed_dim'],
             image_embedding_size=(image_embedding_size, image_embedding_size),
-            input_image_size=(inp_size, inp_size),
+            input_image_size=(encoder_mode['img_size'], encoder_mode['img_size']),
             mask_in_chans=16,
             task_num=encoder_mode['task_num']
         )
@@ -89,23 +90,6 @@ class Task_SAM(nn.Module):
             iou_head_hidden_dim=256,
         )
 
-        # use the old data from Sam, but not use it, because it's useful for color pictures, but we are using gray pictures
-        # self.pixel_mean=encoder_mode['pixel_mean']
-        # self.pixel_std=encoder_mode['pixel_std']
-
-        # self.loss_mode = loss
-        # if self.loss_mode == 'bce':
-        #     self.criterionBCE = torch.nn.BCEWithLogitsLoss()
-
-        # elif self.loss_mode == 'bbce':
-        #     self.criterionBCE = BBCEWithLogitLoss()
-
-        # elif self.loss_mode == 'iou':
-        #     self.criterionBCE = torch.nn.BCEWithLogitsLoss()
-        #     self.criterionIOU = IOU()
-        
-        # self.criterionBCE = torch.nn.BCEWithLogitsLoss()
-        # self.dice_loss = BinaryDiceLoss()
     
     def forward(
         self,
@@ -113,11 +97,11 @@ class Task_SAM(nn.Module):
         multimask_output: bool=False,
     )->List[Dict[str, torch.Tensor]]:
         images = batched_input['image'] #[B, H, W, C]
-        input_images = [self.transform.apply_image(x.permute(2, 0, 1)) for x in images] # [B, H, W, C]
-        input_image_torch = torch.as_tensor(np.array(input_images), device=self.device, dtype=torch.float).permute(0, 3, 1, 2) # [B, C, H, W]
-        input_image_torch = torch.stack([self.preprocess(input_image_torch[x]) for x in range(len(input_image_torch))], dim=0) # padding
+        input_images_torch = self.transform.apply_image_torch(images.permute(0, 3, 1, 2)) #[B, C, H, W]
+        input_images_torch = input_images_torch.contiguous()
+        input_images_torch = torch.stack([self.preprocess(input_images_torch[x]) for x in range(len(input_images_torch))], dim=0) # padding
 
-        image_embeddings = self.image_encoder(input_image_torch) #[B, C, H, W]
+        image_embeddings = self.image_encoder(input_images_torch) #[B, C, H, W]
         
 
         # for image_record, curr_embedding in zip(batched_input, image_embeddings):
@@ -140,8 +124,8 @@ class Task_SAM(nn.Module):
         )
         masks = self.postprocess_masks(
             low_res_masks,
-            input_size=input_image_torch.shape[-2:], # 与下一行做修改
-            original_size=batched_input["original_size"],
+            input_size=input_images_torch.shape[-2:], # 与下一行做修改
+            original_size=self.original_size,
         )
         masks = masks > self.mask_threshold
         outputs={
@@ -158,7 +142,7 @@ class Task_SAM(nn.Module):
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
         """Normalize pixel values and pad to a square input."""
         # Normalize colors
-        x = (x - self.pixel_mean) / self.pixel_std 
+        # x = (x - self.pixel_mean) / self.pixel_std 
        
 
         # Pad
@@ -196,18 +180,18 @@ class Task_SAM(nn.Module):
             align_corners=False,
         )
         masks = masks[..., : input_size[0], : input_size[1]]
-        masks = F.interpolate(masks, (original_size[0][0].item(), original_size[1][0].item()), mode="bilinear", align_corners=False)
+        masks = F.interpolate(masks, (original_size, original_size), mode="bilinear", align_corners=False)
         return masks
 
-    def backward_G(self, mask, gt):
-        """Calculate GAN and L1 loss for the generator"""
-        self.loss_G = self.criterionBCE(mask, gt)
-        self.loss_G += self.dice_loss(nn.Sigmoid()(mask), gt)
+    # def backward_G(self, mask, gt):
+    #     """Calculate GAN and L1 loss for the generator"""
+    #     self.loss_G = self.criterionBCE(mask, gt)
+    #     self.loss_G += self.dice_loss(nn.Sigmoid()(mask), gt)
 
-        if self.loss_mode == 'iou':
-            self.loss_G += self.criterionIOU(mask, gt)
+    #     if self.loss_mode == 'iou':
+    #         self.loss_G += self.criterionIOU(mask, gt)
 
-        return self.loss_G
+    #     return self.loss_G
 
     def optimize_parameters(self):
         self.optimizer.zero_grad()  # set G's gradients to zero

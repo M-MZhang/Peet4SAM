@@ -32,51 +32,7 @@ class Myeloma:
         self.test = test
 
         self.bbox_shift = bbox_shift
-        # print(f"number of images:{len(self.gt_path_files)}")
 
-
-    # def __len__(self):
-    #     return len(self.gt_path_files)
-
-    # def __getitem__(self, index):
-    #     # load npy files(还是应该先把nii.gz文件全部都拆成npy文件才行)
-    #     img_name = os.path.basename(self.gt_path_files[index])
-        
-    #     high_img = np.load(
-    #         join(self.high_path, img_name), "r", allow_pickle=True
-    #     ) 
-    #     # (1024, 1024, 3)
-    #     # convert the shape to (3, H, W)
-    #     high_img = np.transpose(high_img, (2, 0, 1))
-
-    #     low_img = np.load(
-    #         join(self.low_path, img_name), "r", allow_pickle=True
-    #     )
-    #     low_img = np.transpose(low_img, (2, 0, 1))
-    #     assert (
-    #         np.max(high_img) <= 1.0 and np.min(high_img) >= 0.0
-    #     ), "image should be normalized to [0, 1]"
-    #     assert (
-    #         np.max(low_img) <= 1.0 and np.min(low_img) >= 0.0
-    #     ),"image should be normalized to [0, 1]"
-
-    #     gt = np.load(
-    #         self.gt_path_files[index], "r", allow_pickle=True
-    #     ) # multiple labels [0, 1,4,5...], (256,256)
-    #     assert img_name == os.path.basename(self.gt_path_files[index]), (
-    #         "img gt name error" + self.gt_path_files[index] + self.npy_files[index]
-    #     )
-    #     label_ids = np.unique(gt)
-    #     assert (len(label_ids)==2), "multi label in mask"
-    #     assert np.max(gt) == 1 and np.min(gt) == 0.0, "ground truth should be 0, 1"
-
-    #     return {
-    #         "image": torch.tensor(high_img).float(),
-    #         "low_img": torch.tensor(low_img).float(),
-    #         "gt": torch.tensor(gt[None, :, :]).long(),
-    #         "name": img_name,
-    #         "original_size": high_img.shape,
-    #     }
     
     def split_dataset(all_files, ratios):
         if len(ratios) !=3:
@@ -106,7 +62,7 @@ class Myeloma:
             for item_gt_path, item_high_path in items:
                 item_gt_path = join(gt_path, item_gt_path)
                 item_high_path = join(high_path, item_high_path)
-                item = Datum(gt_path=item_gt_path, high_path=item_high_path)
+                item = (item_high_path, item_gt_path)
                 out.append(item)
             return out
 
