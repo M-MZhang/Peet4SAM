@@ -12,6 +12,8 @@ from typing import Optional, Tuple, Type
 
 from .common import LayerNorm2d, MLPBlock
 
+from statistics import mean
+
 
 # This class and its supporting functions below lightly adapted from the ViTDet backbone available at: https://github.com/facebookresearch/detectron2/blob/main/detectron2/modeling/backbone/vit.py # noqa
 class ImageEncoderViT(nn.Module):
@@ -211,7 +213,7 @@ class ImageEncoderViT_task(nn.Module):
 
     def forward(self, x: torch.Tensor, task_embed: torch.Tensor) -> torch.Tensor:
         x = self.patch_embed(x)
-        task_adapter_embeddings = self.adapter(task_embed)
+        task_adapter_embeddings = self.adapter(task_embed)  #[layers, task_num, dim]
         if self.pos_embed is not None:
             x = x + self.pos_embed
 
@@ -254,7 +256,7 @@ class Task_adapter(nn.Module):
     def forward(self, task_embed: torch.Tensor):
         task_adapter_embeddings = []
         for i in range(self.num_layers):
-            task_adapter_embeddings.append(self.adapter_mlp_list[i](task_embed)) #这个地方尝试使用的task_embed仍然只有一个
+            task_adapter_embeddings.append(torch.mean(self.adapter_mlp_list[i](task_embed),axis=0)) #这里尝试增加task_num数量但是平权
         
         return task_adapter_embeddings
 

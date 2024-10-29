@@ -10,7 +10,7 @@ train_wrapper:
   args:
     inp_size: 256
     augment: true
-  batch_size: 64
+  batch_size: 16
    
 
 val_wrapper:
@@ -18,14 +18,14 @@ val_wrapper:
     args:
       inp_size: 256
       augment: false
-    batch_size: 64
+    batch_size: 16
 
 test_wrapper:
     name: test
     args:
       inp_size: 256
       augment: false
-    batch_size: 64
+    batch_size: 16
 
 
     
@@ -66,7 +66,7 @@ model:
       embed_dim: 768
       depth: 12
       num_heads: 12
-      task_num: 1
+      task_num: 2
       pixel_mean: [123.675, 116.28, 103.53]
       pixel_std: [58.395, 57.12, 57.375]
       global_attn_indexes:
@@ -88,5 +88,5 @@ multi_step_lr:
 epoch_val: 1
 epoch_save: 1
 
-resume: 20
-start_epoch: 20
+# resume: 20
+# start_epoch: 20

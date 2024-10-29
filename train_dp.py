@@ -69,7 +69,11 @@ def prepare_training():
     
     if torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model, device_ids=device_ids)
-   
+    
+    # trainable_parameters = [{'params':model.module.task_specific_embed.parameters(), 'is_embedding':True}, 
+    #                         {'params':model.module.image_encoder.adapter.parameters()}, 
+    #                         {'params':model.module.prompt_encoder.prompt_adapter.parameters()}]
+
     optimizer = utils.make_optimizer(
             model.parameters(), config['optimizer'])
 
@@ -82,8 +86,10 @@ def prepare_training():
 
 
 
-def train(train_loader, model, optimizer, ce_loss, dice_loss):
+def train(train_loader, model, optimizer):
     model.train()
+    ce_loss = torch.nn.BCEWithLogitsLoss()
+    dice_loss = BinaryDiceLoss()
     
     pbar = tqdm(total=len(train_loader), leave=False, desc='train')
     
@@ -109,8 +115,9 @@ def train(train_loader, model, optimizer, ce_loss, dice_loss):
     return mean(loss_list)
 
 
-def eval_psnr(loader, model, dice_loss, eval_type=None):
+def eval_psnr(loader, model, eval_type=None):
     model.eval()
+    dice_loss = BinaryDiceLoss()
 
     if eval_type == 'f1':
         metric_fn = utils.calc_f1
@@ -191,10 +198,8 @@ def main(config_, save_path, args):
     timer = utils.Timer()
 
     for epoch in range(epoch_start, epoch_max + 1):
-        ce_loss = torch.nn.BCEWithLogitsLoss()
-        dice_loss = BinaryDiceLoss()
         t_epoch_start = timer.t()
-        train_loss_G = train(train_loader, model, optimizer, ce_loss, dice_loss)
+        train_loss_G = train(train_loader, model, optimizer)
         lr_scheduler.step()
 
         
@@ -212,12 +217,12 @@ def main(config_, save_path, args):
         
         if (epoch_val is not None) and (epoch % epoch_val == 0):
            
-            dice_loss, iou_loss = eval_psnr(val_loader, model, dice_loss, eval_type=config.get('eval_type'))
+            dice_loss, iou_loss = eval_psnr(val_loader, model, eval_type=config.get('eval_type'))
             
-            log_info.append('dice_loss: {:.4f}'.format(dice_loss))
-            writer.add_scalar('dice_loss',dice_loss, epoch)
-            log_info.append('iou_loss:{:4f}'.format(iou_loss))
-            writer.add_scalar('iou_loss', iou_loss, epoch)
+            log_info.append('mDIC: {:.4f}'.format(1-dice_loss))
+            writer.add_scalar('mDIC',1-dice_loss, epoch)
+            log_info.append('mIOU:{:4f}'.format(1-iou_loss))
+            writer.add_scalar('mIOU', 1-iou_loss, epoch)
         
             if dice_loss < min_loss:
                 min_loss = dice_loss
@@ -260,6 +265,6 @@ if __name__ == '__main__':
         save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
     if args.tag is not None:
         save_name += '_' + args.tag
-    save_path = os.path.join('../save', save_name, 'train')
+    save_path = os.path.join('../save', save_name, 'train', str(config['model']['args']['encoder_mode']['task_num'])+"_prompts")
 
     main(config, save_path, args=args)

@@ -11,7 +11,7 @@ from torch import nn
 from typing import Any, Optional, Tuple, Type
 
 from .common import LayerNorm2d
-
+from statistics import mean
 
 class PromptEncoder(nn.Module):
     def __init__(
@@ -386,7 +386,7 @@ class PromptEncoder_task(nn.Module):
         # ) #[B, task_num, C] 1 1 256
         task_specific_embeddings = self.prompt_adapter(task_specific_embed).unsqueeze(0).expand(
             bs, self.task_num, self.embed_dim
-        ) #[1, 1, 256]
+        ) #[1, task_num, 256]
         
         sparse_embeddings = torch.cat([sparse_embeddings, task_specific_embeddings], dim=1)
 

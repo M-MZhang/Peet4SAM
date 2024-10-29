@@ -52,7 +52,7 @@ class Task_SAM(nn.Module):
 
 
         # 不一定是一个，但是先用一个做
-        self.task_specific_embed = nn.Embedding(1, self.embed_dim)
+        self.task_specific_embed = nn.Embedding(encoder_mode['task_num'], self.embed_dim)
         
         self.image_encoder = ImageEncoderViT_task(
             depth=encoder_mode['depth'],
