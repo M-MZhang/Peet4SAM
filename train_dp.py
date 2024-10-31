@@ -17,8 +17,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import time
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '7'
-device_ids=[0]
+os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3, 4, 5, 6 ,7'
+device_ids=[0, 1, 2,3 , 4,5 ,6 ,7]
 # torch.cuda.set_device('cuda:{}'.format(device_ids[0]))
 
 
@@ -214,8 +214,8 @@ def main(config_, save_path, args):
             log_info.append('mIOU:{:4f}'.format(1-iou_loss))
             writer.add_scalar('mIOU', 1-iou_loss, epoch)
         
-            if dice_loss < min_loss:
-                min_loss = dice_loss
+            # if (dice_loss + iou_loss) < min_loss:
+            #     min_loss = dice_loss + iou_loss
             
             if epoch % 10 == 0:
                 save(config, model, save_path, str(epoch))
@@ -255,6 +255,6 @@ if __name__ == '__main__':
         save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
     if args.tag is not None:
         save_name += '_' + args.tag
-    save_path = os.path.join('save', save_name, 'train', config['dataset']['name'], str(config['model']['args']['encoder_mode']['task_num'])+"_prompts")
+    save_path = os.path.join('../save', save_name, 'train', config['dataset']['name'], str(config['model']['args']['encoder_mode']['task_num'])+"_prompts")
 
     main(config, save_path, args=args)

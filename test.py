@@ -95,7 +95,7 @@ def main(config_, save_path, args):
 
     if config.get('resume') is not None:
         try:
-            task_specific_embed = torch.load(os.path.join('../save',args.name, 'train', "prompt_epoch_"+str(config['resume'])+".pth"))
+            task_specific_embed = torch.load(os.path.join('../save',args.name, 'train','kvasir_seg','1_prompts', "prompt_epoch_"+str(config['resume'])+".pth"))
             model.task_specific_embed.load_state_dict(task_specific_embed, strict=False)
         except FileNotFoundError:
             print ("File does not exist!")

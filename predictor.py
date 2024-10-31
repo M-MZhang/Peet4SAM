@@ -13,24 +13,24 @@ join = os.path.join
 from datasets.uitls import read_json
 
 def main(config):
-    json_path = 'data/Kvasir-SEG/split_kvasir_seg.json'
-    data_root = 'data/Kvasir-SEG/npy'
-    save_root = 'visulization/Kvasir-SEG'
+    json_path = '../data/Kvasir-SEG/split_kvasir_seg.json'
+    data_root = '../data/Kvasir-SEG/npy'
+    save_root = '../visulization/Kvasir-SEG'
     os.makedirs(save_root, exist_ok=True)
 
     split_file = read_json(json_path)
     val_list = split_file['val']
 
-    sam_checkpoint = torch.load(config['sam_checkpoint'])
+    # sam_checkpoint = torch.load(config['sam_checkpoint'])
     model = trainers.make(config['model']).cuda()
-    model_state_dict = model.state_dict()
-    model_state_dict.update(sam_checkpoint)
-    model.load_state_dict(model_state_dict)
+    # model_state_dict = model.state_dict()
+    # model_state_dict.update(sam_checkpoint)
+    # model.load_state_dict(model_state_dict)
 
     if config.get('resume') is not None:
         try:
-            task_specific_embed = torch.load(os.path.join('save',args.name, 'train', "prompt_epoch_"+str(config['resume'])+".pth"))
-            model.task_specific_embed.load_state_dict(task_specific_embed, strict=False)
+            task_specific_embed = torch.load(os.path.join('../save',args.name, 'train','kvasir_seg','1_prompts', "prompt_epoch_"+str(config['resume'])+".pth"))
+            model.load_state_dict(task_specific_embed, strict=False)
         except FileNotFoundError:
             print ("File does not exist!")
             raise
