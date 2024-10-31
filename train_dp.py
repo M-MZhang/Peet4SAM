@@ -59,8 +59,8 @@ def prepare_training():
     if config.get('resume') is not None:
         epoch_start = config.get('resume') + 1
         try:
-            task_specific_embed = torch.load(os.path.join(save_path, 'prompt_epoch_'+str(config['resume'])+'.pth'))
-            model.prompt_encoder.task_specific_embed.load_state_dict(task_specific_embed)
+            task_specific_embed = torch.load(os.path.join(save_path, 'model_epoch_'+str(config['resume'])+'.pth'))
+            model.load_state_dict(task_specific_embed)
         except FileExistsError:
             print('No such file!')
             raise
@@ -214,9 +214,7 @@ def main(config_, save_path, args):
             log_info.append('mIOU:{:4f}'.format(1-iou_loss))
             writer.add_scalar('mIOU', 1-iou_loss, epoch)
         
-            # if (dice_loss + iou_loss) < min_loss:
-            #     min_loss = dice_loss + iou_loss
-            
+       
             if epoch % 10 == 0:
                 save(config, model, save_path, str(epoch))
             
@@ -231,12 +229,7 @@ def main(config_, save_path, args):
 
 
 def save(config, model, save_path, name):
-    if config['model']['name'] == 'task_sam':
-            task_specific_prompt = model.module.task_specific_embed.state_dict()
-            torch.save(task_specific_prompt,
-                       os.path.join(save_path, f"prompt_epoch_{name}.pth"))
-    else:
-        torch.save(model.state_dict(), os.path.join(save_path, f"model_epoch_{name}.pth"))
+    torch.save(model.module.state_dict(), os.path.join(save_path, f"model_epoch_{name}.pth"))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -255,6 +248,6 @@ if __name__ == '__main__':
         save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
     if args.tag is not None:
         save_name += '_' + args.tag
-    save_path = os.path.join('../save', save_name, 'train', config['dataset']['name'], str(config['model']['args']['encoder_mode']['task_num'])+"_prompts")
+    save_path = os.path.join('save', save_name, 'train', config['dataset']['name'], str(config['model']['args']['encoder_mode']['task_num'])+"_prompts")
 
     main(config, save_path, args=args)

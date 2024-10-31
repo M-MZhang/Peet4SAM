@@ -18,8 +18,8 @@ class Myeloma:
         self.gt_path = join(self.data_root, "labelsTr")
         self.img_path = join(self.data_root, "imagesTr")
         self.split_path = join(self.data_root, "split_BrainTumour.json")
-        self.split_fewshot_dir = join(self.data_root, "split_fewshot")
-        mkdir_if_missing(self.split_fewshot_dir)
+        # self.split_fewshot_dir = join(self.data_root, "split_fewshot")
+        # mkdir_if_missing(self.split_fewshot_dir)
 
         if os.path.exists(self.split_path):
             train, val, test = self.read_split(self.split_path, self.gt_path, self.img_path)
@@ -91,11 +91,11 @@ class Myeloma:
             gt = sitk.ReadImage(gt_nii_file)
             img = sitk.ReadImage(img_nii_file)
             gt = sitk.GetArrayFromImage(gt)
-            img = sitk.GetArrayFromImage(img)   
+            img = sitk.GetArrayFromImage(img)[3] # T2序列
 
             gt = np.uint8(gt)
             # remove all label except 1
-            gt[gt !=1 ] = 0
+            gt[gt !=1 ] = 0 #水肿范围
 
             z_index, _, _ = np.where(gt>0)
             z_index = np.unique(z_index)
@@ -107,7 +107,7 @@ class Myeloma:
                     img_i = img[slice_i, :, :]
                     # covert MRI img to [0-1]
                     img_clip = np.quantile(img_i, 0.99)
-                    img_low = min(img_i)
+                    img_low = img_i.min()
                     img_i = np.where(img_i > img_clip, img_clip, img_i)
                     # Normalization
                     img_i = (img_i - img_low*1.) / (img_clip*1. - img_low*1.)

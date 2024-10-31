@@ -87,21 +87,23 @@ def main(config_, save_path, args):
     
     test_loader = make_data_loaders()
     
-    sam_checkpoint = torch.load(config['sam_checkpoint'])
+    # sam_checkpoint = torch.load(config['sam_checkpoint'])
     model = trainers.make(config['model']).cuda()
-    model_state_dict = model.state_dict()
-    model_state_dict.update(sam_checkpoint)
-    model.load_state_dict(model_state_dict)
+    # model_state_dict = model.state_dict()
+    # model_state_dict.update(sam_checkpoint)
+    # model.load_state_dict(model_state_dict)
+
+    if torch.cuda.device_count()>1:
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
 
     if config.get('resume') is not None:
         try:
-            task_specific_embed = torch.load(os.path.join('../save',args.name, 'train','kvasir_seg','1_prompts', "prompt_epoch_"+str(config['resume'])+".pth"))
-            model.task_specific_embed.load_state_dict(task_specific_embed, strict=False)
+            task_specific_embed = torch.load(os.path.join('save',args.name, 'train','kvasir_seg','1_prompts', "model_epoch_"+str(config['resume'])+".pth")) 
+            model.load_state_dict(task_specific_embed, strict=False)
         except FileNotFoundError:
             print ("File does not exist!")
             raise
-    if torch.cuda.device_count()>1:
-        model = torch.nn.DataParallel(model, device_ids=device_ids)
+    
 
     dice_loss, iou_loss = evaluate(test_loader, model)
 
@@ -135,6 +137,6 @@ if __name__ == '__main__':
         save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
     if args.tag is not None:
         save_name += '_' + args.tag
-    save_path = os.path.join('../save', save_name, 'test')
+    save_path = os.path.join('save', save_name, 'test')
 
     main(config, save_path, args=args)
