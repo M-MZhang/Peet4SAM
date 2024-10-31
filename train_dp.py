@@ -17,8 +17,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import time
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3, 4, 5, 6, 7'
-device_ids=[0, 1, 2, 3, 4, 5, 6, 7]
+os.environ['CUDA_VISIBLE_DEVICES'] = '7'
+device_ids=[0]
 # torch.cuda.set_device('cuda:{}'.format(device_ids[0]))
 
 
@@ -70,10 +70,6 @@ def prepare_training():
     if torch.cuda.device_count() > 1:
         model = torch.nn.DataParallel(model, device_ids=device_ids)
     
-    # trainable_parameters = [{'params':model.module.task_specific_embed.parameters(), 'is_embedding':True}, 
-    #                         {'params':model.module.image_encoder.adapter.parameters()}, 
-    #                         {'params':model.module.prompt_encoder.prompt_adapter.parameters()}]
-
     optimizer = utils.make_optimizer(
             model.parameters(), config['optimizer'])
 
@@ -169,11 +165,6 @@ def main(config_, save_path, args):
         yaml.dump(config, f, sort_keys=False)
     
     train_loader, val_loader = make_data_loaders()
-    if config.get('data_norm') is None:
-        config['data_norm'] = {
-            'inp': {'sub': [0], 'div': [1]},
-            'gt': {'sub': [0], 'div': [1]}
-        }
 
     model, optimizer, epoch_start, lr_scheduler = prepare_training()
     model.optimizer = optimizer
@@ -185,7 +176,6 @@ def main(config_, save_path, args):
         else:
             print(name)
         
-
     
     model_total_params = sum(p.numel() for p in model.parameters())
     model_grad_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -202,7 +192,7 @@ def main(config_, save_path, args):
         train_loss_G = train(train_loader, model, optimizer)
         lr_scheduler.step()
 
-        
+     
         log_info = ['epoch {}/{}'.format(epoch, epoch_max)]
         writer.add_scalar('lr', optimizer.param_groups[0]['lr'], epoch)
         log_info.append('train G: loss={:.4f}'.format(train_loss_G))
@@ -265,6 +255,6 @@ if __name__ == '__main__':
         save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
     if args.tag is not None:
         save_name += '_' + args.tag
-    save_path = os.path.join('../save', save_name, 'train', str(config['model']['args']['encoder_mode']['task_num'])+"_prompts")
+    save_path = os.path.join('save', save_name, 'train', config['dataset']['name'], str(config['model']['args']['encoder_mode']['task_num'])+"_prompts")
 
     main(config, save_path, args=args)

@@ -30,7 +30,7 @@ test_wrapper:
 
     
 eval_type: cod
-sam_checkpoint: ../pretrained/sam_vit_b_01ec64.pth
+sam_checkpoint: pretrained/sam_vit_b_01ec64.pth
 data_norm:
   inp:
     sub:
@@ -66,7 +66,7 @@ model:
       embed_dim: 768
       depth: 12
       num_heads: 12
-      task_num: 2
+      task_num: 1
       pixel_mean: [123.675, 116.28, 103.53]
       pixel_std: [58.395, 57.12, 57.375]
       global_attn_indexes:
@@ -88,5 +88,5 @@ multi_step_lr:
 epoch_val: 1
 epoch_save: 1
 
-# resume: 20
+# resume: 50
 # start_epoch: 20

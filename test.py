@@ -16,10 +16,10 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import time
+import pickle
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
-device_ids=[0, 1, 2, 3]
-
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5,6,7'
+device_ids=[0, 1, 2, 3, 4, 5, 6,7]
 
 
 def make_data_loader(spec, dataset_source, tag=''):
@@ -56,6 +56,7 @@ def evaluate(loader, model, eval_type=None):
 
     dice_loss_list = []
     iou_loss_list = []
+
     for batch in loader:
         gt = batch['gt'].to('cuda')
 
@@ -64,9 +65,12 @@ def evaluate(loader, model, eval_type=None):
         loss_2 = iou_loss(pred['low_res_logits'], gt)
         dice_loss_list.append(loss_1.item())
         iou_loss_list.append(loss_2.item())
+        
+        
 
         if pbar is not None:
             pbar.update(1)
+    
     
     if pbar is not None:
         pbar.close()
@@ -91,8 +95,8 @@ def main(config_, save_path, args):
 
     if config.get('resume') is not None:
         try:
-            task_specific_embed = torch.load(os.path.join('save',args.name, 'train', "prompt_epoch_"+str(config['resume'])+".pth"))
-            model.prompt_encoder.task_specific_embed.load_state_dict(task_specific_embed, strict=False)
+            task_specific_embed = torch.load(os.path.join('../save',args.name, 'train', "prompt_epoch_"+str(config['resume'])+".pth"))
+            model.task_specific_embed.load_state_dict(task_specific_embed, strict=False)
         except FileNotFoundError:
             print ("File does not exist!")
             raise
@@ -102,12 +106,12 @@ def main(config_, save_path, args):
     dice_loss, iou_loss = evaluate(test_loader, model)
 
     log_info = ['Test result for {}/{}'.format(args.name, config.get('resume'))]
-    log_info.append(['Dice loss: {}'.format(dice_loss)])
-    log_info.append(['Iou loss: {}'.format(iou_loss)])
+    log_info.append('mDice: {}'.format(1-dice_loss))
+    log_info.append('mIOU: {}'.format(1-iou_loss))
 
-    log(','.join(log_info))
+    log(','.join(log_info), 'log.txt')
     writer.flush
-    
+
     
     
 
@@ -131,6 +135,6 @@ if __name__ == '__main__':
         save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
     if args.tag is not None:
         save_name += '_' + args.tag
-    save_path = os.path.join('save', save_name, 'test')
+    save_path = os.path.join('../save', save_name, 'test')
 
     main(config, save_path, args=args)
