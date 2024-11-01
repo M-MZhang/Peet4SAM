@@ -110,7 +110,7 @@ class Myeloma:
                     img_low = img_i.min()
                     img_i = np.where(img_i > img_clip, img_clip, img_i)
                     # Normalization
-                    img_i = (img_i - img_low*1.) / (img_clip*1. - img_low*1.)
+                    img_i = (img_i - img_low*1.) / (img_clip*1. - img_low*1. + 0.00001)
                     img_i_3c = np.repeat(img_i[:, :, None], 3, axis=-1)
 
                     resize_img_i = transform.resize(
@@ -144,7 +144,7 @@ class Myeloma:
 
 
                     re_img_i_path = join(
-                            save_root,
+                            save_path,
                             "imgs",
                             id
                         )

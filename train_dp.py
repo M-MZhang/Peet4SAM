@@ -17,8 +17,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import time
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3, 4, 5, 6 ,7'
-device_ids=[0, 1, 2,3 , 4,5 ,6 ,7]
+os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 4, 5, 6 ,7'
+device_ids=[0, 1, 2,3 , 4, 5 ,6 ]
 # torch.cuda.set_device('cuda:{}'.format(device_ids[0]))
 
 
@@ -234,6 +234,8 @@ def save(config, model, save_path, name):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', default="configs/sam-vit-task.yaml")
+    parser.add_argument('--save-path', default='save/task_specific_v2/train/braintumour/1_prompts')
+    parser.add_argument('--sam-checkpoint', default='/pretrained/sam_vit_b_01ec64.pth')
     parser.add_argument('--name', default=None)
     parser.add_argument('--tag', default=None)
     parser.add_argument("--local_rank", type=int, default=-1, help="")
