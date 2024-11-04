@@ -17,8 +17,8 @@ import torch.distributed as dist
 import torch.nn as nn
 import time
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 4, 5, 6 ,7'
-device_ids=[0, 1, 2,3 , 4, 5 ,6 ]
+os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2,3, 4, 5, 6 ,7'
+device_ids=[0, 1, 2,3 , 4, 5 ,6 ,7]
 # torch.cuda.set_device('cuda:{}'.format(device_ids[0]))
 
 
@@ -250,6 +250,6 @@ if __name__ == '__main__':
         save_name = '_' + args.config.split('/')[-1][:-len('.yaml')]
     if args.tag is not None:
         save_name += '_' + args.tag
-    save_path = os.path.join('save', save_name, 'train', config['dataset']['name'], str(config['model']['args']['encoder_mode']['task_num'])+"_prompts")
+    save_path = os.path.join('../save', save_name, 'train', config['dataset']['name'], str(config['model']['args']['encoder_mode']['task_num'])+"_prompts")
 
     main(config, save_path, args=args)

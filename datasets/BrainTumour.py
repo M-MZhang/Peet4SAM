@@ -22,7 +22,7 @@ class Myeloma:
         # mkdir_if_missing(self.split_fewshot_dir)
 
         if os.path.exists(self.split_path):
-            train, val, test = self.read_split(self.split_path, self.gt_path, self.img_path)
+            train, val, test = self.read_split(self.split_path, self.data_root)
         else:
             all_files = os.listdir(self.gt_path)
             train, val, test = self.split_dataset(all_files, ratios)
@@ -59,14 +59,14 @@ class Myeloma:
 
     
     @staticmethod
-    def read_split(filepath, gt_path, high_path):
+    def read_split(filepath, data_root):
         def _convert(items):
             out = []
-            for item_gt_path, item_high_path in items:
-                item_gt_path = join(gt_path, item_gt_path)
-                item_high_path = join(high_path, item_high_path)
+            for item in items:
+                item_gt_path = join(data_root, 'npy', 'gts', item)
+                item_img_path = join(data_root, 'npy','imgs', item)
                 # item = Datum(gt_path=item_gt_path, high_path=item_high_path)
-                item = (item_high_path, item_gt_path)
+                item = (item_img_path, item_gt_path)
                 out.append(item)
             return out
 
@@ -153,10 +153,10 @@ class Myeloma:
                         pickle.dump(resize_img_i, f)
                     
 
-
-                    file_gt_path = join(re_gt_i_path, str(slice_i).zfill(3) + ".pkl")
-                    file_high_path = join(re_img_i_path, str(slice_i).zfill(3) + ".pkl")
-                    out.append((file_gt_path, file_high_path))
+                    item = join(id, str(slice_i).zfill(3) + ".pkl")
+                    # file_gt_path = join(re_gt_i_path, str(slice_i).zfill(3) + ".pkl")
+                    # file_high_path = join(re_img_i_path, str(slice_i).zfill(3) + ".pkl")
+                    out.append(item)
             
             return out
 
