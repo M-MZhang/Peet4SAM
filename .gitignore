@@ -1,0 +1,35 @@
+# Bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model checkpoints / pretrained weights
+*.pth
+*.pt
+save/
+pretrained/
+
+# Logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data
+data/
+
+# Misc
+*.swp
+*.swo
