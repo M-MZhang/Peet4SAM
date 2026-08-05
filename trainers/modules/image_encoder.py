@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import Optional, Tuple, Type
+from typing import Optional, Tuple, Type, List
 
 from .common import LayerNorm2d, MLPBlock
 
@@ -33,6 +33,7 @@ class ImageEncoderViT(nn.Module):
         rel_pos_zero_init: bool = True,
         window_size: int = 0,
         global_attn_indexes: Tuple[int, ...] = (),
+        num_q_prompts: int = 4,
     ) -> None:
         """
         Args:
@@ -51,9 +52,12 @@ class ImageEncoderViT(nn.Module):
             rel_pos_zero_init (bool): If True, zero initialize relative positional parameters.
             window_size (int): Window size for window attention blocks.
             global_attn_indexes (list): Indexes for blocks using global attention.
+            num_q_prompts (int): Number of Q-prompts (one per global attention layer).
         """
         super().__init__()
         self.img_size = img_size
+        self.global_attn_indexes = global_attn_indexes
+        self.num_q_prompts = num_q_prompts
 
         self.patch_embed = PatchEmbed(
             kernel_size=(patch_size, patch_size),
@@ -103,17 +107,73 @@ class ImageEncoderViT(nn.Module):
             LayerNorm2d(out_chans),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # --- QA-SAM: Q-prompts (token-concat version) ---
+        # Q-prompts are learnable tokens concatenated as an extra row to the
+        # feature map before each global-attention block.  They participate in
+        # self-attention with all image patches (like MaPLe / VPT).
+        # Shape: [num_q_prompts, 1, embed_dim]  — 1 token per global-attn layer
+        self.q_prompts = nn.Parameter(
+            torch.zeros(num_q_prompts, 1, embed_dim)
+        )
+        nn.init.trunc_normal_(self.q_prompts, std=0.02)
+
+        # f_I_q: project Q-prompt output token → decoder dim (out_chans)
+        # Q-prompt output is a single token after attention — no pooling needed.
+        self.f_I_q = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(embed_dim, out_chans),
+                nn.LayerNorm(out_chans),
+            ) for _ in range(num_q_prompts)
+        ])
+
+    def forward(self, x: torch.Tensor):
+        """
+        Returns:
+            x:              Final neck output               [B, out_chans, H, W]
+            inter_spatial:  Raw spatial features (no neck)   [B, embed_dim, H, W] × N_q
+                            Projection (1×1 conv) is done in the decoder.
+            inter_q:        Q-prompt output tokens           [B, out_chans] × N_q
+                            (token concat → attention → f_I_q, for Q→A MLPs)
+        """
         x = self.patch_embed(x)
         if self.pos_embed is not None:
             x = x + self.pos_embed
 
-        for blk in self.blocks:
-            x = blk(x)
+        inter_spatial = []
+        inter_q = []
+        q_idx = 0
 
-        x = self.neck(x.permute(0, 3, 1, 2)) #[B, C, H, W]
+        for i, blk in enumerate(self.blocks):
+            if i in self.global_attn_indexes:
+                B, H, W, C = x.shape
+                N = H * W  # 64×64 = 4096
 
-        return x
+                # ---- Inject Q-prompt as single token in flattened sequence ----
+                x_flat = x.reshape(B, N, C)                   # [B, 4096, C]
+                q = self.q_prompts[q_idx].expand(B, 1, C)     # [B, 1, C]
+                x_with_q = torch.cat([x_flat, q], dim=1)      # [B, 4097, C]
+                x_with_q = x_with_q.reshape(B, N + 1, 1, C)   # [B, 4097, 1, C]
+
+                x_with_q = blk(x_with_q)  # single Q-token in global attention
+
+                # ---- Extract Q-output and restore spatial shape ----
+                x = x_with_q[:, :N, 0, :].reshape(B, H, W, C) # [B, 64, 64, C]
+                q_out = x_with_q[:, N:, 0, :]                  # [B, 1, C]
+
+                q_feat = self.f_I_q[q_idx](q_out.squeeze(1))  # [B, 1, out_chans]
+                inter_q.append(q_feat.squeeze(1))             # [B, out_chans]
+
+                # ---- Spatial intermediate: raw (no neck, decoder handles projection) ----
+                spatial = x.permute(0, 3, 1, 2)      # [B, embed_dim, H, W]
+                inter_spatial.append(spatial)
+
+                q_idx += 1
+            else:
+                x = blk(x)
+
+        x = self.neck(x.permute(0, 3, 1, 2))  # [B, out_chans, H, W]
+
+        return x, inter_spatial, inter_q
 
 
 class Block(nn.Module):
@@ -132,21 +192,6 @@ class Block(nn.Module):
         window_size: int = 0,
         input_size: Optional[Tuple[int, int]] = None,
     ) -> None:
-        """
-        Args:
-            dim (int): Number of input channels.
-            num_heads (int): Number of attention heads in each ViT block.
-            mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
-            qkv_bias (bool): If True, add a learnable bias to query, key, value.
-            norm_layer (nn.Module): Normalization layer.
-            act_layer (nn.Module): Activation layer.
-            use_rel_pos (bool): If True, add relative positional embeddings to the attention map.
-            rel_pos_zero_init (bool): If True, zero initialize relative positional parameters.
-            window_size (int): Window size for window attention blocks. If it equals 0, then
-                use global attention.
-            input_size (tuple(int, int) or None): Input resolution for calculating the relative
-                positional parameter size.
-        """
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
@@ -194,16 +239,6 @@ class Attention(nn.Module):
         rel_pos_zero_init: bool = True,
         input_size: Optional[Tuple[int, int]] = None,
     ) -> None:
-        """
-        Args:
-            dim (int): Number of input channels.
-            num_heads (int): Number of attention heads.
-            qkv_bias (bool):  If True, add a learnable bias to query, key, value.
-            rel_pos (bool): If True, add relative positional embeddings to the attention map.
-            rel_pos_zero_init (bool): If True, zero initialize relative positional parameters.
-            input_size (tuple(int, int) or None): Input resolution for calculating the relative
-                positional parameter size.
-        """
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -213,11 +248,9 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
 
         self.use_rel_pos = use_rel_pos
+        self.input_h = input_size[0] if input_size else None
         if self.use_rel_pos:
-            assert (
-                input_size is not None
-            ), "Input size must be provided if using relative positional encoding."
-            # initialize relative positional embeddings
+            assert input_size is not None
             self.rel_pos_h = nn.Parameter(torch.zeros(2 * input_size[0] - 1, head_dim))
             self.rel_pos_w = nn.Parameter(torch.zeros(2 * input_size[1] - 1, head_dim))
 
@@ -231,7 +264,17 @@ class Attention(nn.Module):
         attn = (q * self.scale) @ k.transpose(-2, -1)
 
         if self.use_rel_pos:
-            attn = add_decomposed_rel_pos(attn, q, self.rel_pos_h, self.rel_pos_w, (H, W), (H, W))
+            # Only apply rel_pos to the original patch grid (H_patch × W).
+            # Q-prompt rows (if any) get ZERO relative-position bias — they
+            # attend purely by content similarity, since they have no spatial
+            # coordinates.
+            patch_h = self.input_h
+            attn[:, :, :patch_h * W, :patch_h * W] = add_decomposed_rel_pos(
+                attn[:, :, :patch_h * W, :patch_h * W].clone(),
+                q[:, :patch_h * W, :],
+                self.rel_pos_h, self.rel_pos_w,
+                (patch_h, W), (patch_h, W),
+            )
 
         attn = attn.softmax(dim=-1)
         x = (attn @ v).view(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
@@ -332,7 +375,6 @@ def add_decomposed_rel_pos(
 ) -> torch.Tensor:
     """
     Calculate decomposed Relative Positional Embeddings from :paper:`mvitv2`.
-    https://github.com/facebookresearch/mvit/blob/19786631e330df9f3622e5402b4a419a263a2c80/mvit/models/attention.py   # noqa B950
     Args:
         attn (Tensor): attention map.
         q (Tensor): query q in the attention layer with shape (B, q_h * q_w, C).

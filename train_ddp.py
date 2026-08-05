@@ -189,12 +189,32 @@ def main(config_, save_path, args):
 
     sam_checkpoint = torch.load(config['sam_checkpoint'])
     model.load_state_dict(sam_checkpoint, strict=False)
-    if config.get('resume') is not None: # load task_spesific_embed in 
-        task_specific_embed = torch.load(os.path.join(save_path, "prompt_epoch_"+str(config['resume'])+".pth"))
-        model.load_state_dict(task_specific_embed, strict=False)
+    if config.get('resume') is not None:
+        try:
+            checkpoint = torch.load(os.path.join(save_path, 'qa_prompts_epoch_'+str(config['resume'])+'.pth'))
+            model.image_encoder.q_prompts.data.copy_(checkpoint['q_prompts'])
+            for idx, mlp_state in enumerate(checkpoint['q_to_a_mlps']):
+                model.q_to_a_mlps[idx].load_state_dict(mlp_state)
+            if 'f_I_q' in checkpoint:
+                for idx, fiq_state in enumerate(checkpoint['f_I_q']):
+                    model.image_encoder.f_I_q[idx].load_state_dict(fiq_state)
+            if 'skip_proj' in checkpoint:
+                model.mask_decoder.skip_proj.load_state_dict(checkpoint['skip_proj'])
+            if local_rank == 0:
+                print(f'Resumed QA-SAM prompts from epoch {config["resume"]}')
+        except FileNotFoundError:
+            if local_rank == 0:
+                print(f'No checkpoint at epoch {config["resume"]}, starting fresh')
 
+    # QA-SAM: freeze SAM backbone; train Q-prompts, Q→A MLPs, f_I, prompt_encoder, mask_decoder
+    trainable_keywords = [
+        "q_prompts", "q_to_a_mlps", "f_I_q", "skip_proj",
+        "prompt_encoder", "mask_decoder",
+    ]
     for name, para in model.named_parameters():
-        if "task_specific_embed" not in name:
+        if any(kw in name for kw in trainable_keywords):
+            para.requires_grad_(True)
+        else:
             para.requires_grad_(False)
     if local_rank == 0:
         model_total_params = sum(p.numel() for p in model.parameters())
@@ -269,9 +289,13 @@ def main(config_, save_path, args):
 
 def save(config, model, save_path, name):
     if config['model']['name'] == 'task_sam':
-            task_specific_prompt = model.prompt_encoder.task_specific_embed.state_dict()
-            torch.save({"prompt_encoder.task_specific_embed": task_specific_prompt},
-                       os.path.join(save_path, f"prompt_epoch_{name}.pth"))
+        checkpoint = {
+            'q_prompts': model.image_encoder.q_prompts.data.clone(),
+            'q_to_a_mlps': [mlp.state_dict() for mlp in model.q_to_a_mlps],
+            'f_I_q': [proj.state_dict() for proj in model.image_encoder.f_I_q],
+            'skip_proj': model.mask_decoder.skip_proj.state_dict(),
+        }
+        torch.save(checkpoint, os.path.join(save_path, f"qa_prompts_epoch_{name}.pth"))
     else:
         torch.save(model.state_dict(), os.path.join(save_path, f"model_epoch_{name}.pth"))
 

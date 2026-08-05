@@ -91,10 +91,18 @@ def main(config_, save_path, args):
 
     if config.get('resume') is not None:
         try:
-            task_specific_embed = torch.load(os.path.join('save',args.name, 'train', "prompt_epoch_"+str(config['resume'])+".pth"))
-            model.prompt_encoder.task_specific_embed.load_state_dict(task_specific_embed, strict=False)
+            checkpoint = torch.load(os.path.join('save', args.name, 'train',
+                                  f"qa_prompts_epoch_{config['resume']}.pth"))
+            model.image_encoder.q_prompts.data.copy_(checkpoint['q_prompts'])
+            for idx, mlp_state in enumerate(checkpoint['q_to_a_mlps']):
+                model.q_to_a_mlps[idx].load_state_dict(mlp_state)
+            if 'f_I_q' in checkpoint:
+                for idx, fiq_state in enumerate(checkpoint['f_I_q']):
+                    model.image_encoder.f_I_q[idx].load_state_dict(fiq_state)
+            if 'skip_proj' in checkpoint:
+                model.mask_decoder.skip_proj.load_state_dict(checkpoint['skip_proj'])
         except FileNotFoundError:
-            print ("File does not exist!")
+            print("Checkpoint file does not exist!")
             raise
     if torch.cuda.device_count()>1:
         model = torch.nn.DataParallel(model, device_ids=device_ids)

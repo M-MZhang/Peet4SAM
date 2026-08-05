@@ -59,11 +59,21 @@ def prepare_training():
     if config.get('resume') is not None:
         epoch_start = config.get('resume') + 1
         try:
-            task_specific_embed = torch.load(os.path.join(save_path, 'prompt_epoch_'+str(config['resume'])+'.pth'))
-            model.prompt_encoder.task_specific_embed.load_state_dict(task_specific_embed)
-        except FileExistsError:
-            print('No such file!')
-            raise
+            checkpoint = torch.load(os.path.join(save_path, 'qa_prompts_epoch_'+str(config['resume'])+'.pth'))
+            # Load Q-prompts
+            model.module.image_encoder.q_prompts.data.copy_(checkpoint['q_prompts'])
+            # Load Q→A MLPs
+            for idx, mlp_state in enumerate(checkpoint['q_to_a_mlps']):
+                model.module.q_to_a_mlps[idx].load_state_dict(mlp_state)
+            # Load f_I projections
+            if 'f_I_q' in checkpoint:
+                for idx, fiq_state in enumerate(checkpoint['f_I_q']):
+                    model.module.image_encoder.f_I_q[idx].load_state_dict(fiq_state)
+            if 'skip_proj' in checkpoint:
+                model.module.mask_decoder.skip_proj.load_state_dict(checkpoint['skip_proj'])
+            print(f'Resumed QA-SAM prompts from epoch {config["resume"]}')
+        except FileNotFoundError:
+            print(f'No checkpoint found at epoch {config["resume"]}, starting fresh')
     else:
         epoch_start = 1
     
@@ -172,11 +182,21 @@ def main(config_, save_path, args):
     model.optimizer = optimizer
 
 
+    # QA-SAM: freeze SAM backbone; train Q-prompts, Q→A MLPs, f_I, prompt_encoder, mask_decoder
+    trainable_keywords = [
+        "q_prompts", "q_to_a_mlps", "f_I_q", "skip_proj",
+        "prompt_encoder", "mask_decoder",
+    ]
     for name, para in model.named_parameters():
-        if "task_specific_embed" not in name:
-            para.requires_grad_(False)
+        if any(kw in name for kw in trainable_keywords):
+            para.requires_grad_(True)
         else:
-            print(name)
+            para.requires_grad_(False)
+
+    # Log trainable param names
+    for name, para in model.named_parameters():
+        if para.requires_grad:
+            print(f'  [trainable] {name}')
     
     model_total_params = sum(p.numel() for p in model.parameters())
     model_grad_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -235,9 +255,14 @@ def main(config_, save_path, args):
 
 def save(config, model, save_path, name):
     if config['model']['name'] == 'task_sam':
-            task_specific_prompt = model.module.prompt_encoder.task_specific_embed.state_dict()
-            torch.save(task_specific_prompt,
-                       os.path.join(save_path, f"prompt_epoch_{name}.pth"))
+        m = model.module if hasattr(model, 'module') else model
+        checkpoint = {
+            'q_prompts': m.image_encoder.q_prompts.data.clone(),
+            'q_to_a_mlps': [mlp.state_dict() for mlp in m.q_to_a_mlps],
+            'f_I_q': [proj.state_dict() for proj in m.image_encoder.f_I_q],
+            'skip_proj': m.mask_decoder.skip_proj.state_dict(),
+        }
+        torch.save(checkpoint, os.path.join(save_path, f"qa_prompts_epoch_{name}.pth"))
     else:
         torch.save(model.state_dict(), os.path.join(save_path, f"model_epoch_{name}.pth"))
 

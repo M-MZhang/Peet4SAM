@@ -66,7 +66,6 @@ model:
       embed_dim: 768
       depth: 12
       num_heads: 12
-      task_num: 1
       pixel_mean: [123.675, 116.28, 103.53]
       pixel_std: [58.395, 57.12, 57.375]
       global_attn_indexes:
